@@ -11,7 +11,7 @@
 
 ### Summary
 
-Pass 10’s rejecting race is fixed at HEAD `6c9796a`.
+review-round 10’s rejecting race is fixed at HEAD `6c9796a`.
 
 `restart_worker()` now:
 
@@ -25,7 +25,7 @@ No library-internal UAF or contract-valid permanent block was found under the do
 
 No rejecting findings.
 
-- **Nit — missing deterministic Pass 10 regression test.** Existing tests cover restart progress and blocked submission, but do not barrier-control shutdown immediately before/after `awp_ring_reopen()` ([test_e2e_lifecycle.c:101](tests/test_e2e_lifecycle.c:101), [test_e2e_lifecycle.c:145](tests/test_e2e_lifecycle.c:145), [test_e2e_lifecycle.c:211](tests/test_e2e_lifecycle.c:211)).
+- **Nit — missing deterministic review round 10 regression test.** Existing tests cover restart progress and blocked submission, but do not barrier-control shutdown immediately before/after `awp_ring_reopen()` ([test_e2e_lifecycle.c:101](tests/test_e2e_lifecycle.c:101), [test_e2e_lifecycle.c:145](tests/test_e2e_lifecycle.c:145), [test_e2e_lifecycle.c:211](tests/test_e2e_lifecycle.c:211)).
 
 - **Nit — stale lifecycle documentation.** DESIGN/README/diagram still mention cancellation, detach, or force-stop, while the implementation quarantines and intentionally leaks ([DESIGN.md:86](docs/DESIGN.md:86), [README.md:77](README.md:77), [DIAGRAMS.md:146](docs/DIAGRAMS.md:146)).
 
@@ -47,7 +47,7 @@ No rejecting findings.
 | Unjoined supervisor cannot lead to reclamation | **PASS** — [pool.c:625](src/pool.c:625) |
 | Library-internal UAF | **PASS — none found** |
 | Contract-valid permanent block | **PASS — none found** |
-| Direct Pass 10 regression coverage | **NIT — absent** |
+| Direct review round 10 regression coverage | **NIT — absent** |
 | Functional binaries | **PASS — 2,597 assertions, 0 failures** |
 | Focused supervisor/lifecycle repetitions | **PASS — 5/5 each** |
 | Diff whitespace validation | **PASS** |

@@ -9,9 +9,9 @@
 
 # Verdict: REJECT
 
-HEAD is clean and matches the expected Pass 6 fix:
+HEAD is clean and matches the expected review round 6 fix:
 
-`5c40ee8 fix: Pass 6 residual — destroy contract, supervisor teardown race`
+`5c40ee8 fix: review round 6 residual — destroy contract, supervisor teardown race`
 
 The destroy contract and supervisor teardown race are fixed. However, one library-internal deadlock remains in the restart-failure path, so this crosses the stated rejection boundary.
 
@@ -44,7 +44,7 @@ Restart failure quarantines the pool but does not increment `shutdown_aborts`. B
 - The benchmark records latency at process entry before its simulated publish work at [`bench_dispatch.c:30`](bench/bench_dispatch.c:30), using a closed-loop burst. It is useful microbenchmark evidence, not real publisher-acceptance evidence.
 - No test injects restart `pthread_create()` failure or exercises a quarantined frame-pool waiter.
 
-## Pass 6 top-5 re-verification
+## review round 6 top-5 re-verification
 
 | Item | Status | Evidence |
 |---|---|---|

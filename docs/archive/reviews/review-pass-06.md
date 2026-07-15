@@ -14,14 +14,14 @@
 Reviewed clean `main` at `0436973`:
 
 ```text
-0436973 fix: Pass 5 residual — single-owner destroy, quarantine admission
-67a7148 Fix Pass 4 S0/S1 reclamation, join, supervisor ownership
-a6d3616 docs: review external high-depth review Pass 4 review (REJECT)
+0436973 fix: review round 5 residual — single-owner destroy, quarantine admission
+67a7148 Fix review round 4 S0/S1 reclamation, join, supervisor ownership
+a6d3616 docs: review external high-depth review review round 4 review (REJECT)
 ```
 
 ### Executive summary
 
-Pass 5’s local lifetime repairs remain intact: lifecycle publication is under `life_mu`, registered shutdown waiters are protected through result sampling, rings are not closed while `active_submits` remain, and join state is recorded only after successful joins. Create rollback now safely leaks after an uncertain join.
+review-round 5’s local lifetime repairs remain intact: lifecycle publication is under `life_mu`, registered shutdown waiters are protected through result sampling, rings are not closed while `active_submits` remain, and join state is recorded only after successful joins. Create rollback now safely leaks after an uncertain join.
 
 However, HEAD is not ready for `ACCEPT WITH NITS`:
 

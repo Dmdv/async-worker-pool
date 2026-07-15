@@ -11,7 +11,7 @@
 
 HEAD is clean and matches `b10c9344f1cb8d92ba8631460cf37b049cdf41c1`.
 
-The exact Pass 7 restart-failure defect is fixed, but another library-internal permanent block remains: stall quarantine wakes frame-freelist waiters but not producers parked on the affected shard’s ring-space condition.
+The exact review-round 7 restart-failure defect is fixed, but another library-internal permanent block remains: stall quarantine wakes frame-freelist waiters but not producers parked on the affected shard’s ring-space condition.
 
 ## Summary
 
@@ -44,7 +44,7 @@ Restart failure now increments `pool->shutdown_aborts` at [supervisor.c:42](src/
 
 However, failed worker creation restores the worker to `JOINED`, and the later shutdown owner initializes a local `aborts = 0` and returns that local value at [pool.c:570](src/pool.c:570). If it encounters no new abort, it can return `0` despite quarantine and `shutdown_aborts == 1`, contrary to the `>0 if quarantined/late` contract at [awp.h:185](include/awp/awp.h:185).
 
-This is not the rejection reason, but the Pass 7 status-reporting finding is only partially resolved.
+This is not the rejection reason, but the review round 7 status-reporting finding is only partially resolved.
 
 ## Re-verification
 
@@ -53,11 +53,11 @@ This is not the rejection reason, but the Pass 7 status-reporting finding is onl
 | `mark_quarantined` closes frame pool | **PASS** | [internal.h:209](src/internal.h:209) calls close; [frame_pool.c:63](src/frame_pool.c:63) sets `closed` and broadcasts. |
 | Submit rechecks after frame acquire | **PASS** | [pool.c:333](src/pool.c:333) rechecks lifecycle, quarantine, and destroy state and releases any acquired frame. |
 | Restart failure increments `shutdown_aborts` | **PASS literally / PARTIAL semantically** | Increment exists; first owner shutdown can still return `0`. |
-| Pass 6.1: externally serialized exactly-once destroy | **PASS** | Contract is explicit at [awp.h:201](include/awp/awp.h:201); reclamation guards remain. |
-| Pass 6.2: no teardown with unjoined supervisor | **PASS** | Both failure paths clear `can_close`; teardown is gated at [pool.c:509](src/pool.c:509). |
-| Pass 6.3: restart-failure wait domains | **PASS for that path** | Shard close plus frame-pool close covers restart-create failure. |
-| Pass 6.4: residual drain deadline | **PASS locally** | Deadline checked before each residual pop at [pool.c:544](src/pool.c:544). |
-| Pass 6.5: prior items remain safe | **FAIL overall** | Bookkeeping fixes remain intact, but stall quarantine leaves the separate ring-space wait domain parked. |
+| review round 6.1: externally serialized exactly-once destroy | **PASS** | Contract is explicit at [awp.h:201](include/awp/awp.h:201); reclamation guards remain. |
+| review round 6.2: no teardown with unjoined supervisor | **PASS** | Both failure paths clear `can_close`; teardown is gated at [pool.c:509](src/pool.c:509). |
+| review round 6.3: restart-failure wait domains | **PASS for that path** | Shard close plus frame-pool close covers restart-create failure. |
+| review round 6.4: residual drain deadline | **PASS locally** | Deadline checked before each residual pop at [pool.c:544](src/pool.c:544). |
+| review round 6.5: prior items remain safe | **FAIL overall** | Bookkeeping fixes remain intact, but stall quarantine leaves the separate ring-space wait domain parked. |
 
 ## Verification evidence
 
@@ -68,5 +68,5 @@ An independent lane observed 2/6 lifecycle failures at the timing-based `restart
 Permitted residual nits remain: stale cancellation/detach wording in DESIGN, benchmark/publisher-acceptance honesty, the external destroy contract, and the non-blocking theoretical `try_push` publication-after-close race.
 
 `★ Insight ─────────────────────────────────────`
-The Pass 7 fix correctly handles both possible frame-acquire outcomes after closure. The rejection comes from a different condition variable: terminal state must be visible to every place where a counted public operation can sleep.
+The review round 7 fix correctly handles both possible frame-acquire outcomes after closure. The rejection comes from a different condition variable: terminal state must be visible to every place where a counted public operation can sleep.
 `─────────────────────────────────────────────────`

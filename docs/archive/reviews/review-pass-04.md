@@ -4,13 +4,13 @@
 |-------|-------|
 | Tooling | Independent external review |
 
-| Reviewed commit | `4b1076c` (Pass 3 S0 fix pass + adversarial tests) |
+| Reviewed commit | `4b1076c` (review round 3 S0 fix pass + adversarial tests) |
 | Date (UTC) | 2026-07-15 |
-| Prior passes | 1 estimate · 2 analysis REJECT · 3 impl review REJECT · fix `4b1076c` |
-| This pass | Post-fix re-review of code + specs |
+| Prior rounds | 1 estimate · 2 analysis REJECT · 3 impl review REJECT · fix `4b1076c` |
+| This round | Post-fix re-review of code + specs |
 | **Verdict** | **REJECT** |
 
-Raw log (local): `(local review log; not in repo)`
+Raw run log: local only (not committed).
 
 ---
 
@@ -20,7 +20,7 @@ Raw log (local): `(local review log; not in repo)`
 
 ### Executive summary
 
-I reviewed clean HEAD `4b1076c6c3c448475647bad2d060acb1b16a8554`. Pass 3’s sticky worker/supervisor quarantine, callback TLS coverage, release-before-park submit path, queue reopen, and no-cancel policy are real improvements. However, concurrent shutdown/destroy remains S0-unsafe: shutdown publishes `STOPPED` before it finishes using the pool’s mutex, allowing destroy to reclaim that mutex and pool underneath it. Submitters and shutdown waiters also remain invisible before their in-object counters are incremented, so the claimed concurrent lifetime protection is incomplete. The steady-state SPSC/MPSC/SPMC/MPMC sequence protocol appears locally correct under its declared cardinalities; I found no payload memory-order defect or classic condition-variable lost wakeup. Additional S1 issues remain in timeout delivery semantics, termination proof, supervisor ownership, create rollback, and shutdown status/deadline reporting. All existing HEAD-built test binaries passed, but several adversarial tests do not exercise what their names claim, and raw-ring tests can miss duplicate-plus-loss. The benchmark still excludes front-half/backpressure latency and ends before publishing, so it does not qualify the 5 ms ingest-to-publish-accept target.
+I reviewed clean HEAD `4b1076c6c3c448475647bad2d060acb1b16a8554`. review-round 3’s sticky worker/supervisor quarantine, callback TLS coverage, release-before-park submit path, queue reopen, and no-cancel policy are real improvements. However, concurrent shutdown/destroy remains S0-unsafe: shutdown publishes `STOPPED` before it finishes using the pool’s mutex, allowing destroy to reclaim that mutex and pool underneath it. Submitters and shutdown waiters also remain invisible before their in-object counters are incremented, so the claimed concurrent lifetime protection is incomplete. The steady-state SPSC/MPSC/SPMC/MPMC sequence protocol appears locally correct under its declared cardinalities; I found no payload memory-order defect or classic condition-variable lost wakeup. Additional S1 issues remain in timeout delivery semantics, termination proof, supervisor ownership, create rollback, and shutdown status/deadline reporting. All existing HEAD-built test binaries passed, but several adversarial tests do not exercise what their names claim, and raw-ring tests can miss duplicate-plus-loss. The benchmark still excludes front-half/backpressure latency and ends before publishing, so it does not qualify the 5 ms ingest-to-publish-accept target.
 
 Executed binaries:
 
@@ -143,7 +143,7 @@ The binaries are newer than the reviewed sources. A fresh build/sanitizer run wa
    - **Failure mode:** Unsupported bits pass through to callbacks, making future compatibility semantics ambiguous.
    - **Fix:** Reject `flags & ~AWP_FRAME_BROADCAST` with `-EINVAL`, or explicitly document unknown-bit pass-through.
 
-### Prior S0 re-verification — Pass 3 themes
+### Prior S0 re-verification — review round 3 themes
 
 | Issue | Status | Evidence |
 |---|---|---|
@@ -155,9 +155,9 @@ The binaries are newer than the reviewed sources. A fresh build/sanitizer run wa
 | Supervisor ownership | **PARTIAL** | Interruptible polling, lifecycle recheck, and restart-failure quarantine landed; joined ownership and recovered-backlog handling remain flawed. |
 | Supervisor not joined past deadline | **FIXED** for UAF | A live unjoined supervisor forces quarantine/leak. Immediate startup can instead produce a false permanent leak. |
 
-### Pass 2 table
+### review round 2 table
 
-| Pass 2 issue | Status | Current evidence |
+| review round 2 issue | Status | Current evidence |
 |---|---|---|
 | AWP-01 submitter/reclamation race | **PARTIAL** | Registered path improved; finding 2 remains. |
 | AWP-02 exit without drain | **FIXED** | Worker drains until closed+empty at [`worker.c:16`](src/worker.c:16). |
@@ -213,7 +213,7 @@ The binaries are newer than the reviewed sources. A fresh build/sanitizer run wa
 - Consistently call `awp_runtime_enabled()` a caller-owned helper; the example should skip creation when disabled rather than setting the environment variable itself.
 - State that true SPMC/MPMC operation is private/internal unless a public raw-ring API is intended.
 - Describe the implementation as atomic queue reservation plus mutex/condvar notification, and qualify freelist lock freedom by platform.
-- Preserve review reports as historical snapshots. Pass 3 is correctly tied to `1e8347b`; Pass 2 should gain an explicit reviewed commit/banner and replace absolute local links.
+- Preserve review reports as historical snapshots. review round 3 is correctly tied to `1e8347b`; review round 2 should gain an explicit reviewed commit/banner and replace absolute local links.
 - Regenerate benchmark evidence at the reviewed commit with raw samples, open-loop schedules, real publisher acceptance, multiple runs, and system telemetry.
 
 ### Top 5 actions ranked by risk reduction

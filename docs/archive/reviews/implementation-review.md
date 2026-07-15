@@ -6,11 +6,11 @@
 
 | Reviewed commit | `1e8347b` (main after lifecycle fixes + diagrams/benches) |
 | Date (UTC) | 2026-07-15 |
-| Prior passes | Pass 1 estimate → `design-estimate.md`; Pass 2 as-implemented → `design-analysis.md` (**REJECT**, mitigations in `c11bab8`) |
-| This pass | Adversarial re-review of **code + specs** after mitigations |
+| Prior rounds | review round 1 estimate → `design-estimate.md`; review round 2 as-implemented → `design-analysis.md` (**REJECT**, mitigations in `c11bab8`) |
+| This round | Adversarial re-review of **code + specs** after mitigations |
 | **Verdict** | **REJECT** |
 
-Raw run log (local scratch, not committed): `(local review log; not in repo)` equivalent under `(local review log; not in repo)`.
+Raw run log: local only (not committed).
 
 ---
 
@@ -209,7 +209,7 @@ Add at minimum:
 - State explicitly that zero full-queue drops is not downstream delivery, and process errors/forced abandonment are separate outcomes.
 - Correct benchmark labels to the interval actually measured until methodology is fixed.
 - Remove `AWP_COMPILE_ENABLED` or implement it; clarify whether `AWP_ENABLED` is enforced or caller-owned.
-- Mark `design-analysis.md` as a historical Pass 2 snapshot with its reviewed commit; replace absolute `/Users/dima/...` links with relative repository links.
+- Mark `design-analysis.md` as a historical review round 2 snapshot with its reviewed commit; replace absolute `/Users/dima/...` links with relative repository links.
 - Correct the header’s “pool logs” and force-stop comments and document callback restrictions, quarantine behavior, metrics-buffer concurrency, and status semantics.
 
 ### Top 5 actions ranked by risk reduction

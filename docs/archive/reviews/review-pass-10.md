@@ -9,7 +9,7 @@
 
 # Verdict: REJECT
 
-HEAD `9dc1587` fixes the direct Pass 9 waiter leak, but a supervisor restart can reopen a ring after terminal shutdown closes it. This creates a public-contract-reachable permanent block. No library-internal UAF was found under the exactly-once, externally quiesced destroy contract.
+HEAD `9dc1587` fixes the direct review round 9 waiter leak, but a supervisor restart can reopen a ring after terminal shutdown closes it. This creates a public-contract-reachable permanent block. No library-internal UAF was found under the exactly-once, externally quiesced destroy contract.
 
 ## Summary
 
@@ -39,7 +39,7 @@ The terminal invariant must prevent any reopen after shutdown wins, or re-close 
 
 ### Nits
 
-- No direct Pass 9 regression test keeps a producer blocked through deadline shutdown. The nearest test releases the callback hang before joining the producer ([test_e2e_lifecycle.c](tests/test_e2e_lifecycle.c:232)).
+- No direct review round 9 regression test keeps a producer blocked through deadline shutdown. The nearest test releases the callback hang before joining the producer ([test_e2e_lifecycle.c](tests/test_e2e_lifecycle.c:232)).
 - DESIGN/README/diagram shutdown descriptions still mention force-stop or cancel/detach, while implementation uses quarantine and intentional leak.
 - Benchmark evidence measures callback-entry latency, not the stronger ingest-to-publish-accept wording.
 - Exactly-once, externally quiesced destroy remains an explicit external contract, not a rejection item.
@@ -58,7 +58,7 @@ The terminal invariant must prevent any reopen after shutdown wins, or re-close 
 | Exactly-once destroy under stated contract | **PASS** |
 | Library-internal UAF under that contract | **PASS — none found** |
 | No library-internal permanent block | **FAIL — REJECT** |
-| Direct Pass 9 regression coverage | **FAIL — non-rejecting test gap** |
+| Direct review round 9 regression coverage | **FAIL — non-rejecting test gap** |
 | HEAD-aligned functional binaries | **PASS — 2,597 assertions, zero failures** |
 | Diff whitespace validation | **PASS** |
 

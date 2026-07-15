@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Reviewed | `eb19f04` (Pass 12 + follow-up); post-review `eef90f5` aligned `bench_all_modes` |
-| Prior | Pass 11 ACCEPT WITH NITS |
-| **Verdict** | **ACCEPT WITH NITS** (all listed Pass 12 nits cleared; remaining bar is external destroy contract only) |
+| Reviewed | `eb19f04` (review round 12 + follow-up); post-review `eef90f5` aligned `bench_all_modes` |
+| Prior | review round 11 ACCEPT WITH NITS |
+| **Verdict** | **ACCEPT WITH NITS** (all listed review round 12 nits cleared; remaining bar is external destroy contract only) |
 
 ---
 
@@ -12,7 +12,7 @@
 
 **ACCEPT WITH NITS**
 
-All four Pass 12 nits are cleared at clean HEAD `eb19f04974d628fb8cad9abc3f6b689c737ef598`. No new library-internal UAF or deadlock was found under the documented lifetime contract.
+All four review round 12 nits are cleared at clean HEAD `eb19f04974d628fb8cad9abc3f6b689c737ef598`. No new library-internal UAF or deadlock was found under the documented lifetime contract.
 
 ## Summary
 
@@ -24,7 +24,7 @@ The quarantine test now keeps callback state alive safely, the reopen regression
 
 ## Re-verification
 
-| Pass 12 nit | Result | Evidence |
+| review round 12 nit | Result | Evidence |
 |---|---|---|
 | Quarantine test lifetime | **Cleared** | Static atomic callback state at [test_e2e_lifecycle.c:342](tests/test_e2e_lifecycle.c:342); no `ctx`; destroy precedes hang clear at [lines 380–381](tests/test_e2e_lifecycle.c:380). Quarantined destroy refuses reclamation at [pool.c:625](src/pool.c:625). |
 | Production reopen helper | **Cleared** | Helper implemented at [supervisor.c:14](src/supervisor.c:14), used by `restart_worker()` at [line 56](src/supervisor.c:56), and called directly by the regression at [test_e2e_lifecycle.c:333](tests/test_e2e_lifecycle.c:333). |

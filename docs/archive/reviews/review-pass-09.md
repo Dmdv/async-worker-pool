@@ -9,7 +9,7 @@
 
 ## Verdict: REJECT
 
-HEAD `92f3b07` is clean. The exact Pass 8 stall fix is correct, and no internal UAF remains under the stated externally quiesced, exactly-once destroy contract. However, a separate contract-reachable permanent block remains.
+HEAD `92f3b07` is clean. The exact review-round 8 stall fix is correct, and no internal UAF remains under the stated externally quiesced, exactly-once destroy contract. However, a separate contract-reachable permanent block remains.
 
 ## Summary
 

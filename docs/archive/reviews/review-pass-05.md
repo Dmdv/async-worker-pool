@@ -4,7 +4,7 @@
 |-------|-------|
 | Tooling | Independent external review |
 
-| Reviewed commit | `67a7148` (Pass 4 S0/S1 fix pass) |
+| Reviewed commit | `67a7148` (review round 4 S0/S1 fix pass) |
 | Date (UTC) | 2026-07-15 |
 | **Verdict** | **REJECT** |
 
@@ -12,7 +12,7 @@
 
 ## Verdict: REJECT
 
-Reviewed clean `main` at `67a71483d365904811c38bba00aa59ec5ab9f697` (`Fix Pass 4 S0/S1 reclamation, join, supervisor ownership`).
+Reviewed clean `main` at `67a71483d365904811c38bba00aa59ec5ab9f697` (`Fix review round 4 S0/S1 reclamation, join, supervisor ownership`).
 
 ## Executive summary
 
@@ -121,7 +121,7 @@ A later shutdown can report `0` even though destroy intentionally leaks.
 
 The API says flags are `AWP_FRAME_*` or zero, but submit never rejects unknown bits and copies them into the callback frame ([pool.c:280–333](src/pool.c:280)).
 
-## Pass 4 item re-verification
+## review round 4 item re-verification
 
 | # | Claimed fix | Status |
 |---:|---|---|
