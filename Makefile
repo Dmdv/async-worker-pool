@@ -57,7 +57,7 @@ EX_SPMC   := build/example_spmc
 EX_MPMC   := build/example_mpmc
 
 .PHONY: all lib tests bench examples e2e check check-all check-bench \
-	check-sanitize check-func install uninstall clean dirs pkgconfig
+	check-sanitize check-func install uninstall clean dirs pkgconfig force-awp-pc
 
 all: dirs lib tests bench examples
 

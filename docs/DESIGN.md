@@ -41,7 +41,7 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 |------|------|
 | `include/awp/awp.h` | Public API |
 | `src/ring.c` | Bounded multi-mode ring (C11 atomics, sequence protocol) |
-| `src/frame_pool.c` | Preallocated frame slab (lock-free freelist) |
+| `src/frame_pool.c` | Preallocated frame slab (freelist; lock-free where supported) |
 | `src/shard.c` | FNV-1a + broadcast dedicated workers |
 | `src/worker.c` | Worker loop + portable timed join |
 | `src/supervisor.c` | Heartbeat / restart |
@@ -70,7 +70,7 @@ Local benchmark numbers: [`BENCHMARKS.md`](BENCHMARKS.md).
 
 **Why not mutex:** An early design estimate recommended mutex+condvar as a first-cut trade-off. Hot path uses atomics instead.
 
-**Frame pool:** lock-free freelist of slab indices with ABA tags (Treiber-style packed head).
+**Frame pool:** freelist of slab indices with ABA tags (Treiber-style packed head); lock-free where the platform provides a lock-free 64-bit atomic (64-bit hosts only).
 
 ## Frame lifecycle
 
@@ -110,7 +110,7 @@ C has no `catch_unwind`. Soft errors **must** be error codes. Hard faults (SIGSE
 5. Else (timeout / unjoined supervisor): **quarantine** — rings closed; stuck callbacks are not cancelled; destroy will leak
 6. `STOPPED`; reclaim on destroy only if joined, not quarantined, no live API refs
 
-Portable: no Linux-only `pthread_timedjoin_np` — poll state + sleep. **No force-stop via cancel/detach.**
+Join budget: Linux uses `pthread_timedjoin_np` where available; other platforms precheck the absolute deadline then join. **No force-stop via cancel/detach.**
 
 `STOPPED` means the public lifecycle is terminal. It does **not** mean all storage was reclaimed when quarantine is set.
 

@@ -144,6 +144,7 @@ typedef struct {
 static void *blocked_submitter(void *arg)
 {
     blocked_arg_t *a = arg;
+    /* Mark entered only once we are about to block inside submit (after arm). */
     atomic_store(&a->entered, 1);
     a->submit_rc = awp_submit(a->pool, "t", "HOT", "y", 1, 0);
     atomic_store(&a->finished, 1);
@@ -183,10 +184,13 @@ static void test_shutdown_wakes_blocked_submitter(void)
     atomic_init(&ba.finished, 0);
     ba.submit_rc = 0;
     TEST_EQ_I(pthread_create(&th, NULL, blocked_submitter, &ba), 0, "thread");
-    for (i = 0; i < 100 && !atomic_load(&ba.entered); i++)
+    for (i = 0; i < 200 && !atomic_load(&ba.entered); i++)
         test_sleep_ms(5);
     TEST_CHECK(atomic_load(&ba.entered) == 1, "submitter entered");
-    test_sleep_ms(20);
+    /* Proof of park: submit holds active_submits while blocked. */
+    for (i = 0; i < 200 && atomic_load(&pool->active_submits) == 0; i++)
+        test_sleep_ms(5);
+    TEST_CHECK(atomic_load(&pool->active_submits) > 0, "submit parked (active_submits)");
     TEST_CHECK(atomic_load(&ba.finished) == 0, "still blocked before shutdown");
 
     shut = awp_pool_shutdown(pool);
