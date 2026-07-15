@@ -154,17 +154,21 @@ E2E: `test_e2e_lifecycle` (drain, concurrent shutdown, restart progress).
 
 ### Pass 3 was **REJECT** — residual reclamation / reentrancy
 
-Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters:
+Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md)).
 
-| Residual theme | Status (Pass 3) |
-|----------------|-----------------|
-| Free while submitters active | **PARTIAL** — deadline can enter `DRAINING` with `active_submits > 0` |
-| Cancel/detach UAF | **STILL OPEN** — shutdown quarantine flag not sticky for destroy leak path |
-| Concurrent shutdown / destroy | **PARTIAL** — `STOPPED` ≠ “no live references” |
-| Callback reentrancy | **PARTIAL** — destroy / `on_error` holes |
-| Restart queue storage | **FIXED** (`reopen`); backlog-safe restart still under-tested |
+### Pass 3 mitigations (post-review fix pass)
 
-See full findings and top-5 fix list in [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md).
+| Residual theme | Fix |
+|----------------|-----|
+| Free while submitters active | Register `active_submits` **before** lifecycle re-check; if still >0 after deadline → sticky `quarantined` |
+| Shutdown quarantine → destroy | `awp_worker_join_deadline` / supervisor always set `pool->quarantined`; destroy leaks if set |
+| Concurrent shutdown / destroy | `shutdown_waiters` + destroy waits for waiters to leave `life_cv` |
+| Callback reentrancy | TLS wraps `process` **and** `on_error`; destroy-from-callback marks quarantine (no free) |
+| Hot-shard holds frames | `awp_ring_try_push`: release frame before parking on full ring |
+| Supervisor ownership | Interruptible interval; recheck `RUNNING` before restart; failed restart → quarantine |
+| Supervisor not joined | Past deadline without join → quarantine (never free under live supervisor) |
+
+New / extended tests: true sticky quarantine + safe destroy, process/on_error reentrancy, try_push backpressure, restart with concurrent producers.
 
 ## Build & verify
 

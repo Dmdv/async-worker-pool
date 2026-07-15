@@ -239,6 +239,76 @@ int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
     }
 }
 
+static int try_push_sp(awp_ring_t *r, awp_frame_t *frame)
+{
+    size_t pos;
+    awp_cell_t *cell;
+    size_t seq;
+    intptr_t dif;
+
+    if (atomic_load_explicit(&r->closed, memory_order_acquire))
+        return -1;
+    pos = atomic_load_explicit(&r->enqueue_pos, memory_order_relaxed);
+    cell = &r->cells[pos & r->mask];
+    seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
+    dif = (intptr_t)seq - (intptr_t)pos;
+    if (dif == 0) {
+        cell->data = frame;
+        atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
+        atomic_store_explicit(&r->enqueue_pos, pos + 1, memory_order_relaxed);
+        awp_ring_wake_all(r);
+        return 0;
+    }
+    if (dif < 0)
+        return -EAGAIN;
+    return -EAGAIN;
+}
+
+static int try_push_mp(awp_ring_t *r, awp_frame_t *frame)
+{
+    size_t pos;
+    awp_cell_t *cell;
+    size_t seq;
+    intptr_t dif;
+
+    if (atomic_load_explicit(&r->closed, memory_order_acquire))
+        return -1;
+    pos = atomic_load_explicit(&r->enqueue_pos, memory_order_relaxed);
+    cell = &r->cells[pos & r->mask];
+    seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
+    dif = (intptr_t)seq - (intptr_t)pos;
+    if (dif == 0) {
+        if (atomic_compare_exchange_weak_explicit(
+                &r->enqueue_pos, &pos, pos + 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            cell->data = frame;
+            atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
+            awp_ring_wake_all(r);
+            return 0;
+        }
+        return -EAGAIN; /* lost race; caller may retry */
+    }
+    if (dif < 0)
+        return -EAGAIN;
+    return -EAGAIN;
+}
+
+int awp_ring_try_push(awp_ring_t *r, awp_frame_t *frame)
+{
+    if (!r || !frame)
+        return -EINVAL;
+    switch (r->mode) {
+    case AWP_RING_SPSC:
+    case AWP_RING_SPMC:
+        return try_push_sp(r, frame);
+    case AWP_RING_MPSC:
+    case AWP_RING_MPMC:
+        return try_push_mp(r, frame);
+    default:
+        return -EINVAL;
+    }
+}
+
 static int pop_sc(awp_ring_t *r, awp_frame_t **out)
 {
     unsigned spin = 0;

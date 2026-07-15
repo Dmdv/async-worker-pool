@@ -6,7 +6,8 @@
  * sharding for per-(feed,symbol) FIFO, backpressure without drops,
  * fault-isolated process callbacks, supervisor heartbeats, bounded shutdown.
  *
- * Enable with AWP_ENABLED=1 (runtime) or compile-time AWP_COMPILE_ENABLED.
+ * Runtime helper: awp_runtime_enabled() reads AWP_ENABLED=1|true|yes.
+ * Creation is not gated by the env var — callers decide whether to create.
  */
 
 #ifndef AWP_AWP_H
@@ -55,13 +56,16 @@ typedef struct awp_frame {
 
 /**
  * Process callback. Return 0 on success, non-zero on soft error.
- * Soft errors must not abort the worker: the pool logs, counts, recycles.
+ * Soft errors must not abort the worker: the pool counts and recycles.
+ * Must not call awp_submit / awp_pool_shutdown / awp_pool_destroy (returns
+ * -EDEADLK for submit/shutdown; destroy marks quarantine and does not free).
  */
 typedef int (*awp_process_fn)(const awp_frame_t *frame, void *user);
 
 /**
  * Called only when process() returns nonzero (soft error).
  * Frame is still recycled by the pool after this returns.
+ * Same reentrancy restrictions as process().
  */
 typedef void (*awp_on_error_fn)(const awp_frame_t *frame, int err, void *user);
 
@@ -89,8 +93,11 @@ typedef struct awp_pool_metrics {
 } awp_pool_metrics_t;
 
 /**
- * Per-worker ring concurrency model (C11 atomics; no mutex).
+ * Per-worker ring concurrency model (C11 atomics sequence protocol; wait
+ * paths may park on a condvar after a spin budget).
  * Pick the mode that matches actual producers/consumers — wrong mode is UB.
+ * The pool uses one consumer thread per ring; SPMC/MPMC still run as a
+ * single-consumer subset at the pool layer (multi-consumer is for raw rings).
  *
  * | Mode  | Producers | Consumers | Typical use                          |
  * |-------|-----------|-----------|--------------------------------------|
@@ -143,15 +150,15 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out);
  * Submit a frame by value (copied into a pooled slot). Blocks if the target
  * worker queue is full (backpressure). Never drops on full queue.
  *
- * Ordering: FIFO is ring linearization order per shard (same-key concurrent
- * producers are ordered by successful push completion, not wall-clock start).
+ * Ordering: FIFO is ring-reservation linearization order per shard (the CAS
+ * or store that claims the enqueue slot), not wall-clock submit start.
  *
  * @param feed, symbol  labels (must fit AWP_*_MAX; oversize → -E2BIG)
  * @param payload       NULL only if payload_len == 0
  * @param payload_len   must be ≤ AWP_PAYLOAD_MAX
  * @param flags         AWP_FRAME_* or 0
  * @return 0 ok; -EINVAL not running/bad args; -E2BIG oversize;
- *         -EDEADLK from process() callback; -1 closed/rejected.
+ *         -EDEADLK from process()/on_error() callback; -1 closed/rejected.
  */
 int awp_submit(awp_pool_t *pool,
                const char *feed,
@@ -176,12 +183,19 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out);
 uint64_t awp_pool_drops(const awp_pool_t *pool);
 
 /**
- * Bounded shutdown: signal workers, wait up to deadline, force-stop stuck ones.
- * @return 0 if all joined cleanly, >0 if some were aborted, <0 on error.
+ * Bounded shutdown: quiesce submits, drain workers up to deadline.
+ * Workers stuck in process() are quarantined (no cancel/detach). If live
+ * references remain after the deadline, destroy will intentionally leak.
+ * @return 0 if all joined cleanly, >0 if some were quarantined/late, <0 on error.
  */
 int awp_pool_shutdown(awp_pool_t *pool);
 
-/** Destroy a pool that has been shut down (or never started fully). */
+/**
+ * Destroy after shutdown (or call shutdown then destroy).
+ * If any worker/supervisor/submitter may still reference pool memory,
+ * storage is leaked intentionally to avoid UAF.
+ * Not safe to call from process()/on_error() (marks quarantine, no free).
+ */
 void awp_pool_destroy(awp_pool_t *pool);
 
 /** Runtime gate: returns 1 if AWP_ENABLED env is "1"/"true"/"yes". */

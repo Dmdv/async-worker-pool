@@ -113,6 +113,8 @@ void awp_ring_wait_data(awp_ring_t *r);
 void awp_ring_wake_all(awp_ring_t *r);
 
 int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out);
+/** Non-blocking push: 0 ok, -1 closed/invalid, -EAGAIN full. */
+int awp_ring_try_push(awp_ring_t *r, awp_frame_t *frame);
 int awp_ring_pop(awp_ring_t *r, awp_frame_t **out);
 uint32_t awp_ring_depth(awp_ring_t *r);
 
@@ -173,9 +175,11 @@ struct awp_pool {
 
     atomic_int lifecycle; /* awp_lifecycle_t */
     atomic_int active_submits;
+    atomic_int shutdown_waiters; /* concurrent shutdown callers waiting STOPPED */
     atomic_int supervisor_stop;
     atomic_int supervisor_alive;
-    atomic_int quarantined; /* 1 if any worker quarantined */
+    atomic_int supervisor_joined; /* 1 if no supervisor or join completed */
+    atomic_int quarantined; /* 1 ⇒ destroy must leak (live refs possible) */
 
     pthread_t supervisor;
     pthread_mutex_t life_mu;
@@ -190,7 +194,7 @@ struct awp_pool {
     uint32_t n_shard_workers;
 };
 
-/* TLS: reject nested submit/shutdown from process() callback. */
+/* TLS: reject nested submit/shutdown/destroy from process()/on_error(). */
 extern _Thread_local int awp_tls_in_callback;
 
 void *awp_worker_main(void *arg);
@@ -198,6 +202,13 @@ void *awp_supervisor_main(void *arg);
 int   awp_worker_start(awp_worker_t *w);
 /** Join with absolute deadline_ns (CLOCK_MONOTONIC). */
 int   awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted);
+
+/** Sticky leak flag: pool storage must not be reclaimed. */
+static inline void awp_pool_mark_quarantined(awp_pool_t *pool)
+{
+    if (pool)
+        atomic_store(&pool->quarantined, 1);
+}
 
 uint32_t awp_compute_shard(const awp_pool_t *pool,
                            const char *feed,

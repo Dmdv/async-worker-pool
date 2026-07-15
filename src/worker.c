@@ -41,15 +41,16 @@ void *awp_worker_main(void *arg)
 
         prc = 0;
         if (pool->cfg.process) {
+            /* Guard process + on_error against nested pool API use. */
             awp_tls_in_callback = 1;
             prc = pool->cfg.process(frame, pool->cfg.user);
+            if (prc != 0) {
+                atomic_fetch_add(&w->process_errors, 1);
+                atomic_fetch_add(&pool->process_errors, 1);
+                if (pool->cfg.on_error)
+                    pool->cfg.on_error(frame, prc, pool->cfg.user);
+            }
             awp_tls_in_callback = 0;
-        }
-        if (prc != 0) {
-            atomic_fetch_add(&w->process_errors, 1);
-            atomic_fetch_add(&pool->process_errors, 1);
-            if (pool->cfg.on_error)
-                pool->cfg.on_error(frame, prc, pool->cfg.user);
         }
 
         atomic_fetch_add(&w->processed, 1);
@@ -73,6 +74,7 @@ int awp_worker_start(awp_worker_t *w)
     rc = pthread_create(&w->thread, NULL, awp_worker_main, w);
     if (rc != 0) {
         atomic_store(&w->state, AWP_W_JOINED);
+        atomic_store(&w->joined, 1);
         return -rc;
     }
     return 0;
@@ -91,6 +93,7 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
 
     st = atomic_load(&w->state);
     if (st == AWP_W_QUARANTINED) {
+        awp_pool_mark_quarantined(w->pool);
         if (aborted)
             *aborted = 1;
         return 1;
@@ -139,6 +142,7 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
     }
 
     atomic_store(&w->state, AWP_W_QUARANTINED);
+    awp_pool_mark_quarantined(w->pool);
     if (aborted)
         *aborted = 1;
     fprintf(stderr,
