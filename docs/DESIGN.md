@@ -136,6 +136,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design | **REJECT** (mitigations in `c11bab8`) |
 | 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** (fixes in `4b1076c`) |
 | 4 — re-review | [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md) | Post-fix re-review of impl + specs (`4b1076c`) | **REJECT** |
+| 5 — re-review | [`CODEX_PASS5_REVIEW.md`](CODEX_PASS5_REVIEW.md) | After Pass 4 fixes (`67a7148`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -181,6 +182,18 @@ Key residual S0 after `4b1076c`:
 2. Pre-registration / untracked public readers cannot be made safe by in-object counters alone; destroy must be externally serialized or use a stable handle.
 
 Full report: [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md).
+
+
+
+### Pass 5 was **REJECT** — lifetime ownership boundary
+
+Pass 5 (`67a7148`) closed local reclamation bookkeeping (STOPPED under `life_mu`, waiters, no-close on active_submits, join-after-success). Residual architecture:
+
+- First-access race before `api_enter` cannot be sealed by in-object counters alone.
+- Concurrent destroy needs single-owner + external API quiescence (or a stable control block).
+- Quarantine must gate admission (submit reject) — addressed in follow-up.
+
+Follow-up on main: single-owner destroy, quarantine admission reject, create-rollback join-safe leak.
 
 ## Build & verify
 

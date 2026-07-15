@@ -150,6 +150,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
     atomic_store(&pool->supervisor_joined, 1);
     atomic_store(&pool->supervisor_started, 0);
     atomic_store(&pool->quarantined, 0);
+    atomic_store(&pool->destroy_started, 0);
 
     if (pthread_mutex_init(&pool->life_mu, NULL) != 0) {
         free(pool);
@@ -234,12 +235,21 @@ fail_running:
         if (!atomic_load(&pool->workers[i].joined)) {
             if (pthread_join(pool->workers[i].thread, NULL) == 0)
                 atomic_store(&pool->workers[i].joined, 1);
+            else {
+                /* Join uncertain — leak this pool body rather than free under live thread. */
+                fprintf(stderr,
+                        "[awp] create rollback: worker %u join failed; leaking\n",
+                        i);
+                return rc; /* intentional leak of partial pool */
+            }
         }
     }
 fail_workers:
-    /* Destroy only successfully initialized rings. */
-    for (i = 0; i < rings_ok; i++)
-        awp_ring_destroy(&pool->workers[i].queue);
+    /* Destroy only successfully initialized rings of joined workers. */
+    for (i = 0; i < rings_ok; i++) {
+        if (atomic_load(&pool->workers[i].joined))
+            awp_ring_destroy(&pool->workers[i].queue);
+    }
     free(pool->workers);
     free(pool->metrics_buf);
 fail_frames:
@@ -297,7 +307,9 @@ int awp_submit(awp_pool_t *pool,
     }
 
     atomic_fetch_add(&pool->active_submits, 1);
-    if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
+    if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
+        atomic_load(&pool->quarantined) ||
+        atomic_load(&pool->destroy_started)) {
         atomic_fetch_sub(&pool->active_submits, 1);
         awp_api_leave(pool);
         return -EINVAL;
@@ -546,6 +558,7 @@ int awp_pool_shutdown(awp_pool_t *pool)
 void awp_pool_destroy(awp_pool_t *pool)
 {
     uint32_t i;
+    int expected = 0;
     if (!pool)
         return;
 
@@ -555,6 +568,10 @@ void awp_pool_destroy(awp_pool_t *pool)
                 "[awp] destroy called from callback; marking quarantine (no free)\n");
         return;
     }
+
+    /* Single destroy owner — concurrent/double destroy is a no-op. */
+    if (!atomic_compare_exchange_strong(&pool->destroy_started, &expected, 1))
+        return;
 
     if (atomic_load(&pool->lifecycle) != AWP_LIFE_STOPPED)
         (void)awp_pool_shutdown(pool);
@@ -592,15 +609,16 @@ void awp_pool_destroy(awp_pool_t *pool)
     for (i = 0; i < pool->cfg.n_workers; i++) {
         if (!atomic_load(&pool->workers[i].joined) &&
             atomic_load(&pool->workers[i].state) != AWP_W_QUARANTINED) {
-            /* Should not happen if reclaimable; be safe. */
             awp_pool_mark_quarantined(pool);
             fprintf(stderr, "[awp] destroy: worker %u not joined; leak\n", i);
             return;
         }
     }
 
-    for (i = 0; i < pool->cfg.n_workers; i++)
-        awp_ring_destroy(&pool->workers[i].queue);
+    for (i = 0; i < pool->cfg.n_workers; i++) {
+        if (atomic_load(&pool->workers[i].joined))
+            awp_ring_destroy(&pool->workers[i].queue);
+    }
     free(pool->workers);
     free(pool->metrics_buf);
     awp_frame_pool_destroy(&pool->frames);

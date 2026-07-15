@@ -181,7 +181,8 @@ struct awp_pool {
     atomic_int supervisor_alive;
     atomic_int supervisor_joined; /* 1 if no supervisor or join completed */
     atomic_int supervisor_started; /* 1 after pthread_create of supervisor succeeds */
-    atomic_int quarantined; /* 1 ⇒ destroy must leak (live refs possible) */
+    atomic_int quarantined; /* 1 ⇒ destroy must leak; submit rejects */
+    atomic_int destroy_started; /* single destroy owner (0→1) */
 
     pthread_t supervisor;
     pthread_mutex_t life_mu;
