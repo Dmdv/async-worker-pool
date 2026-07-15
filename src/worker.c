@@ -146,8 +146,10 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
         if (now >= deadline_ns)
             return 1;
         rem = deadline_ns - now;
+        /* timedjoin_np needs an absolute REALTIME clock; recompute remaining
+         * from MONOTONIC each iteration so wall-clock jumps do not accumulate. */
         if (clock_gettime(CLOCK_REALTIME, &abs) != 0)
-            return -errno;
+            return 1; /* treat clock failure as budget exhausted, not unbounded */
         abs.tv_sec += (time_t)(rem / 1000000000ull);
         abs.tv_nsec += (long)(rem % 1000000000ull);
         if (abs.tv_nsec >= 1000000000L) {
@@ -199,45 +201,24 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
         return -rc;
     }
 
-    if (clock_gettime(CLOCK_REALTIME, &abs) != 0) {
-        /* Wait until helper finishes if deadline clock fails. */
-        pthread_mutex_lock(&box->mu);
-        while (!box->done)
-            pthread_cond_wait(&box->cv, &box->mu);
-        rc = box->rc;
-        pthread_mutex_unlock(&box->mu);
-        awp_join_box_free(box);
-        return rc == 0 ? 0 : -rc;
-    }
-    {
-        uint64_t now = awp_now_ns();
-        uint64_t rem = (deadline_ns > now) ? (deadline_ns - now) : 0;
-        abs.tv_sec += (time_t)(rem / 1000000000ull);
-        abs.tv_nsec += (long)(rem % 1000000000ull);
-        if (abs.tv_nsec >= 1000000000L) {
-            abs.tv_sec += 1;
-            abs.tv_nsec -= 1000000000L;
-        }
-    }
-
+    /*
+     * Poll completion against CLOCK_MONOTONIC only — do not use REALTIME
+     * timedwait (wall-clock steps must not stretch the budget).
+     */
     pthread_mutex_lock(&box->mu);
     while (!box->done) {
-        rc = pthread_cond_timedwait(&box->cv, &box->mu, &abs);
-        if (rc == ETIMEDOUT) {
-            if (box->done)
-                break; /* join completed as wait expired */
-            /* Timeout: helper owns box and will free after join completes. */
+        if (awp_now_ns() >= deadline_ns) {
             box->released = 1;
             free_box = 0;
             pthread_mutex_unlock(&box->mu);
             return 1;
         }
-        if (rc != 0 && rc != EINTR) {
-            box->released = 1;
-            free_box = 0;
-            pthread_mutex_unlock(&box->mu);
-            return -rc;
+        pthread_mutex_unlock(&box->mu);
+        {
+            struct timespec ts = { .tv_sec = 0, .tv_nsec = 2 * 1000 * 1000 };
+            nanosleep(&ts, NULL);
         }
+        pthread_mutex_lock(&box->mu);
     }
     rc = box->rc;
     pthread_mutex_unlock(&box->mu);

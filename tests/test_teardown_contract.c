@@ -201,10 +201,20 @@ static void test_shutdown_wakes_blocked_submitter(void)
     for (i = 0; i < 200 && !atomic_load(&ba.entered); i++)
         test_sleep_ms(5);
     TEST_CHECK(atomic_load(&ba.entered) == 1, "submitter entered");
-    /* Proof of park: submit holds active_submits while blocked. */
-    for (i = 0; i < 200 && atomic_load(&pool->active_submits) == 0; i++)
-        test_sleep_ms(5);
-    TEST_CHECK(atomic_load(&pool->active_submits) > 0, "submit parked (active_submits)");
+    /*
+     * Proof of park: active_submits stays elevated while finished stays 0
+     * across many samples (submit mid-flight, not a fast fail).
+     */
+    {
+        int stuck_samples = 0;
+        for (i = 0; i < 80; i++) {
+            if (atomic_load(&pool->active_submits) > 0 &&
+                atomic_load(&ba.finished) == 0)
+                stuck_samples++;
+            test_sleep_ms(5);
+        }
+        TEST_CHECK(stuck_samples >= 40, "sustained mid-submit park");
+    }
     TEST_CHECK(atomic_load(&ba.finished) == 0, "still blocked before shutdown");
 
     shut = awp_pool_shutdown(pool);

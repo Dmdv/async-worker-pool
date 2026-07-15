@@ -392,10 +392,11 @@ int awp_submit(awp_pool_t *pool,
             awp_cpu_relax();
         else {
             uint64_t t0 = awp_now_ns();
+            /* Count block entry before park so observers can detect parking. */
+            atomic_fetch_add(&pool->workers[shard].enqueue_blocks, 1);
             awp_ring_wait_space(&pool->workers[shard].queue);
             blocked_acc += awp_now_ns() - t0;
             spin = 0;
-            atomic_fetch_add(&pool->workers[shard].enqueue_blocks, 1);
         }
     }
 
