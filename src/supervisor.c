@@ -27,11 +27,19 @@ static int restart_worker(awp_pool_t *pool, awp_worker_t *w)
         return -1;
     if (join_worker_thread(w) != 0)
         return -1;
+    /* Do not reopen after shutdown has won terminal close. */
+    if (!life_is_running(pool)) {
+        awp_ring_close(&w->queue); /* keep closed if shutdown already closed */
+        return -1;
+    }
     /* Preserve backlog: reopen if closed, keep cells. */
     awp_ring_reopen(&w->queue);
     atomic_store(&w->last_progress_ns, awp_now_ns());
-    if (!life_is_running(pool))
+    if (!life_is_running(pool)) {
+        /* Shutdown closed/terminal after our reopen — re-close so waiters exit. */
+        awp_ring_close(&w->queue);
         return -1;
+    }
     if (awp_worker_start(w) == 0) {
         atomic_fetch_add(&w->restarts, 1);
         return 0;

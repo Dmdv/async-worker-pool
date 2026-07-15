@@ -141,6 +141,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 7 — re-review | [`CODEX_PASS7_REVIEW.md`](CODEX_PASS7_REVIEW.md) | After Pass 6 contract/teardown (`5c40ee8`) | **REJECT** |
 | 8 — re-review | [`CODEX_PASS8_REVIEW.md`](CODEX_PASS8_REVIEW.md) | After frame-pool wake (`b10c934`) | **REJECT** |
 | 9 — re-review | [`CODEX_PASS9_REVIEW.md`](CODEX_PASS9_REVIEW.md) | After stall ring close (`92f3b07`) | **REJECT** |
+| 10 — re-review | [`CODEX_PASS10_REVIEW.md`](CODEX_PASS10_REVIEW.md) | After all-rings close (`9dc1587`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
