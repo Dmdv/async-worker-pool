@@ -20,6 +20,7 @@ TEST_UNIT_MODES := build/test_unit_modes
 TEST_SUP        := build/test_supervisor
 TEST_E2E        := build/test_e2e
 TEST_E2E_MODES  := build/test_e2e_modes
+TEST_E2E_LIFE   := build/test_e2e_lifecycle
 TEST_RING       := build/test_ring_modes
 
 # --- benches ---
@@ -65,6 +66,9 @@ $(TEST_E2E): tests/test_e2e.c $(LIB)
 $(TEST_E2E_MODES): tests/test_e2e_modes.c $(LIB)
 	$(CC) $(CFLAGS) -Itests $< -L. -lawp $(LDFLAGS) -o $@
 
+$(TEST_E2E_LIFE): tests/test_e2e_lifecycle.c $(LIB)
+	$(CC) $(CFLAGS) -Itests -Isrc $< -L. -lawp $(LDFLAGS) -o $@
+
 $(TEST_RING): tests/test_ring_modes.c $(LIB)
 	$(CC) $(CFLAGS) -Itests -Isrc $< -L. -lawp $(LDFLAGS) -o $@
 
@@ -94,7 +98,7 @@ $(EX_SPMC): examples/example_spmc.c $(LIB)
 $(EX_MPMC): examples/example_mpmc.c $(LIB)
 	$(CC) $(CFLAGS) -Isrc $< -L. -lawp $(LDFLAGS) -o $@
 
-tests: dirs $(TEST_UNIT) $(TEST_UNIT_MODES) $(TEST_SUP) $(TEST_E2E) $(TEST_E2E_MODES) $(TEST_RING)
+tests: dirs $(TEST_UNIT) $(TEST_UNIT_MODES) $(TEST_SUP) $(TEST_E2E) $(TEST_E2E_MODES) $(TEST_E2E_LIFE) $(TEST_RING)
 bench: dirs $(BENCH_DISPATCH) $(BENCH_ALL_MODES) $(BENCH_RING)
 examples: dirs $(EX_SIMPLE) $(EX_SPSC) $(EX_MPSC) $(EX_SPMC) $(EX_MPMC)
 e2e: $(TEST_E2E) $(TEST_E2E_MODES)
@@ -106,6 +110,7 @@ check: all
 	@echo "=== supervisor ===" && $(TEST_SUP)
 	@echo "=== e2e (default MPSC) ===" && $(TEST_E2E)
 	@echo "=== e2e modes (all) ===" && $(TEST_E2E_MODES) all
+	@echo "=== e2e lifecycle ===" && $(TEST_E2E_LIFE)
 	@echo "=== bench dispatch ===" && $(BENCH_DISPATCH) 3000 1000
 	@echo "=== bench all modes ===" && $(BENCH_ALL_MODES) 4000 1000 all
 	@echo "=== bench ring ===" && $(BENCH_RING) 50000 all

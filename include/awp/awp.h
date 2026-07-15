@@ -60,8 +60,8 @@ typedef struct awp_frame {
 typedef int (*awp_process_fn)(const awp_frame_t *frame, void *user);
 
 /**
- * Optional free-hook when a frame is recycled after process (or drop-on-shutdown).
- * Not used for hot-path allocation; frames always come from the pool slab.
+ * Called only when process() returns nonzero (soft error).
+ * Frame is still recycled by the pool after this returns.
  */
 typedef void (*awp_on_error_fn)(const awp_frame_t *frame, int err, void *user);
 
@@ -81,11 +81,11 @@ typedef struct awp_worker_metrics {
 /** Aggregate pool metrics. */
 typedef struct awp_pool_metrics {
     uint64_t submitted;
-    uint64_t dropped;          /**< Must stay 0 under normal backpressure. */
+    uint64_t dropped;          /**< Rejected/abandoned (not full-queue backpressure). */
     uint64_t process_errors;
-    uint64_t shutdown_aborts;  /**< Workers force-stopped at shutdown. */
+    uint64_t shutdown_aborts;  /**< Workers quarantined / late at shutdown. */
     uint32_t n_workers;
-    awp_worker_metrics_t *workers; /**< Length n_workers; owned by pool until destroy. */
+    awp_worker_metrics_t *workers; /**< Length n_workers; valid until next get_metrics/destroy. */
 } awp_pool_metrics_t;
 
 /**
@@ -143,11 +143,15 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out);
  * Submit a frame by value (copied into a pooled slot). Blocks if the target
  * worker queue is full (backpressure). Never drops on full queue.
  *
- * @param feed, symbol  labels (truncated to AWP_*_MAX)
- * @param payload       may be NULL if payload_len == 0
- * @param payload_len   clamped to AWP_PAYLOAD_MAX
+ * Ordering: FIFO is ring linearization order per shard (same-key concurrent
+ * producers are ordered by successful push completion, not wall-clock start).
+ *
+ * @param feed, symbol  labels (must fit AWP_*_MAX; oversize → -E2BIG)
+ * @param payload       NULL only if payload_len == 0
+ * @param payload_len   must be ≤ AWP_PAYLOAD_MAX
  * @param flags         AWP_FRAME_* or 0
- * @return 0 on success, negative on shutdown/error. Drops stay 0 on full.
+ * @return 0 ok; -EINVAL not running/bad args; -E2BIG oversize;
+ *         -EDEADLK from process() callback; -1 closed/rejected.
  */
 int awp_submit(awp_pool_t *pool,
                const char *feed,

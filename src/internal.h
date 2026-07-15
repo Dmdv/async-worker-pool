@@ -14,12 +14,34 @@
 #include <unistd.h>
 #include <stdint.h>
 #include <sched.h>
+#include <limits.h>
 
 #ifndef AWP_CACHELINE
 #define AWP_CACHELINE 64
 #endif
 
 #define AWP_ALIGN_CACHE alignas(AWP_CACHELINE)
+
+/** Max ring capacity (power-of-two, leaves headroom in size_t positions). */
+#define AWP_RING_CAP_MAX (1u << 24)
+
+/* ---- lifecycle / worker states ------------------------------------------ */
+
+typedef enum awp_lifecycle {
+    AWP_LIFE_INIT = 0,
+    AWP_LIFE_RUNNING,
+    AWP_LIFE_QUIESCING, /* reject new submits; wait active_submits */
+    AWP_LIFE_DRAINING,  /* rings closed; workers empty queues */
+    AWP_LIFE_STOPPED
+} awp_lifecycle_t;
+
+typedef enum awp_wstate {
+    AWP_W_STARTING = 0,
+    AWP_W_RUNNING,
+    AWP_W_EXITED,
+    AWP_W_JOINED,
+    AWP_W_QUARANTINED /* stuck in callback; must not free pool memory */
+} awp_wstate_t;
 
 /* ---- time / backoff ----------------------------------------------------- */
 
@@ -40,43 +62,29 @@ static inline void awp_cpu_relax(void)
     __asm__ __volatile__("pause" ::: "memory");
 #elif defined(__aarch64__) || defined(__arm__)
     __asm__ __volatile__("yield" ::: "memory");
-#else
-    /* no-op */
 #endif
-}
-
-/** Spin a bit, then yield — cancel point for force-shutdown. */
-static inline void awp_backoff(unsigned spin)
-{
-    if (spin < 64) {
-        unsigned i;
-        for (i = 0; i < (1u << (spin < 6 ? spin : 6)); i++)
-            awp_cpu_relax();
-    } else {
-        pthread_testcancel();
-        sched_yield();
-    }
 }
 
 static inline uint32_t awp_round_up_pow2(uint32_t v)
 {
     if (v < 2)
         return 2;
+    if (v > AWP_RING_CAP_MAX)
+        return 0; /* overflow / too large */
     v--;
     v |= v >> 1;
     v |= v >> 2;
     v |= v >> 4;
     v |= v >> 8;
     v |= v >> 16;
-    return v + 1;
+    v++;
+    if (v == 0 || v > AWP_RING_CAP_MAX)
+        return 0;
+    return v;
 }
 
-/* ---- bounded ring: SPSC | MPSC | SPMC | MPMC (atomics) ------------------ */
+/* ---- bounded ring: SPSC | MPSC | SPMC | MPMC ---------------------------- */
 
-/**
- * Cache-line padded cell: sequence + data pointer (Vyukov-style).
- * Mode selects store vs CAS on enqueue_pos / dequeue_pos.
- */
 typedef struct awp_cell {
     AWP_ALIGN_CACHE atomic_size_t sequence;
     awp_frame_t *data;
@@ -86,46 +94,46 @@ typedef struct awp_ring {
     AWP_ALIGN_CACHE atomic_size_t enqueue_pos;
     AWP_ALIGN_CACHE atomic_size_t dequeue_pos;
     awp_cell_t *cells;
-    size_t capacity; /* power of two */
+    size_t capacity;
     size_t mask;
     awp_ring_mode_t mode;
     atomic_int closed;
+    /* Hybrid park (not on data path CAS): after spin budget, wait here. */
+    pthread_mutex_t wait_mu;
+    pthread_cond_t wait_cv;
 } awp_ring_t;
 
 int  awp_ring_init(awp_ring_t *r, uint32_t capacity, awp_ring_mode_t mode);
 void awp_ring_destroy(awp_ring_t *r);
 void awp_ring_close(awp_ring_t *r);
+/** Clear closed flag; keep queued cells (for worker restart without loss). */
+void awp_ring_reopen(awp_ring_t *r);
+void awp_ring_wait_space(awp_ring_t *r);
+void awp_ring_wait_data(awp_ring_t *r);
+void awp_ring_wake_all(awp_ring_t *r);
 
-/**
- * Enqueue pointer. Spins while full and not closed (backpressure, never drop).
- * @return 0 ok, -1 closed/shutdown
- */
 int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out);
-
-/**
- * Dequeue. Spins while empty and not closed.
- * @return 0 ok, -1 closed and empty
- */
 int awp_ring_pop(awp_ring_t *r, awp_frame_t **out);
-
-/** Approximate depth (enqueue - dequeue); lock-free. */
 uint32_t awp_ring_depth(awp_ring_t *r);
 
-/* ---- frame object pool (lock-free Treiber stack of indices) ------------- */
+/* ---- frame object pool -------------------------------------------------- */
 
 typedef struct awp_frame_pool {
     awp_frame_t *slab;
-    atomic_uint *next;           /* next free index chain */
-    atomic_uint_fast64_t head;   /* packed: tag<<32 | idx  (idx==0xFFFFFFFF empty) */
+    atomic_uint *next;
+    atomic_uint_fast64_t head;
     uint32_t size;
     atomic_int closed;
+    atomic_int lock_free_ok; /* 1 if 64-bit head is lock-free */
+    pthread_mutex_t wait_mu;
+    pthread_cond_t wait_cv;
 } awp_frame_pool_t;
 
 int  awp_frame_pool_init(awp_frame_pool_t *p, uint32_t size);
 void awp_frame_pool_destroy(awp_frame_pool_t *p);
 void awp_frame_pool_close(awp_frame_pool_t *p);
+void awp_frame_pool_reopen(awp_frame_pool_t *p);
 
-/** Acquire a zeroed frame (spins if exhausted until recycle or close). */
 awp_frame_t *awp_frame_pool_acquire(awp_frame_pool_t *p);
 void awp_frame_pool_release(awp_frame_pool_t *p, awp_frame_t *f);
 
@@ -144,8 +152,11 @@ typedef struct awp_worker {
     atomic_uint_fast64_t queue_hwm;
     atomic_uint_fast64_t last_progress_ns;
     atomic_uint_fast64_t restarts;
-    atomic_int alive;
-    atomic_int stop;
+    atomic_uint_fast64_t generation;
+
+    atomic_int state; /* awp_wstate_t */
+    atomic_int stop;  /* cooperative stop between frames (not mid-callback) */
+    atomic_int joined;
 } awp_worker_t;
 
 struct awp_pool {
@@ -154,17 +165,23 @@ struct awp_pool {
     awp_frame_pool_t frames;
 
     atomic_uint_fast64_t submitted;
-    atomic_uint_fast64_t dropped;
+    atomic_uint_fast64_t dropped; /* abandonment / rejection (not full-queue) */
     atomic_uint_fast64_t process_errors;
     atomic_uint_fast64_t shutdown_aborts;
     atomic_uint_fast64_t seq;
+    atomic_uint_fast64_t abandoned; /* frames recycled without process */
 
-    atomic_int running;
-    atomic_int shutting_down;
+    atomic_int lifecycle; /* awp_lifecycle_t */
+    atomic_int active_submits;
+    atomic_int supervisor_stop;
+    atomic_int supervisor_alive;
+    atomic_int quarantined; /* 1 if any worker quarantined */
 
     pthread_t supervisor;
-    atomic_int supervisor_alive;
+    pthread_mutex_t life_mu;
+    pthread_cond_t life_cv;
 
+    pthread_mutex_t metrics_mu;
     awp_worker_metrics_t *metrics_buf;
 
     char **broadcast_feeds;
@@ -173,10 +190,14 @@ struct awp_pool {
     uint32_t n_shard_workers;
 };
 
+/* TLS: reject nested submit/shutdown from process() callback. */
+extern _Thread_local int awp_tls_in_callback;
+
 void *awp_worker_main(void *arg);
 void *awp_supervisor_main(void *arg);
 int   awp_worker_start(awp_worker_t *w);
-int   awp_worker_join(awp_worker_t *w, uint32_t deadline_ms, int *aborted);
+/** Join with absolute deadline_ns (CLOCK_MONOTONIC). */
+int   awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted);
 
 uint32_t awp_compute_shard(const awp_pool_t *pool,
                            const char *feed,

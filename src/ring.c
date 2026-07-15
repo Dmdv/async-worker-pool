@@ -1,33 +1,60 @@
 #include "internal.h"
 
 /*
- * Bounded atomic ring — all four concurrency models (SPSC/MPSC/SPMC/MPMC).
- *
- * Sequence protocol (Vyukov-style cells), C11 atomics, no mutex.
- *
- *   SPSC: store claim on both ends (caller guarantees single P and C)
- *   MPSC: CAS claim on enqueue; store on dequeue
- *   SPMC: store on enqueue; CAS claim on dequeue
- *   MPMC: CAS claim on both ends
- *
- * Full/empty: spin + pause/yield. Never drop. closed aborts waiters.
- * Capacity rounded up to power of two; cells cache-line padded.
+ * Bounded atomic ring — SPSC/MPSC/SPMC/MPMC (Vyukov sequences).
+ * Full/empty: spin budget then park on condvar (hybrid).
+ * close/reopen: admission control without freeing storage.
  */
+
+#define AWP_SPIN_BUDGET 64
+
+void awp_ring_wake_all(awp_ring_t *r)
+{
+    if (!r)
+        return;
+    pthread_mutex_lock(&r->wait_mu);
+    pthread_cond_broadcast(&r->wait_cv);
+    pthread_mutex_unlock(&r->wait_mu);
+}
+
+void awp_ring_wait_space(awp_ring_t *r)
+{
+    pthread_mutex_lock(&r->wait_mu);
+    while (!atomic_load_explicit(&r->closed, memory_order_acquire) &&
+           awp_ring_depth(r) >= (uint32_t)r->capacity) {
+        pthread_cond_wait(&r->wait_cv, &r->wait_mu);
+    }
+    pthread_mutex_unlock(&r->wait_mu);
+}
+
+void awp_ring_wait_data(awp_ring_t *r)
+{
+    pthread_mutex_lock(&r->wait_mu);
+    while (!atomic_load_explicit(&r->closed, memory_order_acquire) &&
+           awp_ring_depth(r) == 0) {
+        pthread_cond_wait(&r->wait_cv, &r->wait_mu);
+    }
+    pthread_mutex_unlock(&r->wait_mu);
+}
 
 static int ring_alloc_cells(awp_ring_t *r, uint32_t capacity)
 {
     size_t i;
     uint32_t cap = awp_round_up_pow2(capacity);
     void *mem = NULL;
+    size_t bytes;
 
-    if (posix_memalign(&mem, AWP_CACHELINE, cap * sizeof(awp_cell_t)) != 0 ||
-        !mem) {
+    if (cap == 0)
+        return -EINVAL;
+    bytes = (size_t)cap * sizeof(awp_cell_t);
+
+    if (posix_memalign(&mem, AWP_CACHELINE, bytes) != 0 || !mem) {
         r->cells = calloc(cap, sizeof(awp_cell_t));
         if (!r->cells)
             return -ENOMEM;
     } else {
         r->cells = mem;
-        memset(r->cells, 0, cap * sizeof(awp_cell_t));
+        memset(r->cells, 0, bytes);
     }
 
     r->capacity = cap;
@@ -45,14 +72,26 @@ static int ring_alloc_cells(awp_ring_t *r, uint32_t capacity)
 
 int awp_ring_init(awp_ring_t *r, uint32_t capacity, awp_ring_mode_t mode)
 {
+    int rc;
     if (!r || capacity < 1)
         return -EINVAL;
-    if (mode > AWP_RING_MPMC)
+    if ((unsigned)mode > (unsigned)AWP_RING_MPMC)
         return -EINVAL;
 
     memset(r, 0, sizeof(*r));
     r->mode = mode;
-    return ring_alloc_cells(r, capacity);
+    if (pthread_mutex_init(&r->wait_mu, NULL) != 0)
+        return -ENOMEM;
+    if (pthread_cond_init(&r->wait_cv, NULL) != 0) {
+        pthread_mutex_destroy(&r->wait_mu);
+        return -ENOMEM;
+    }
+    rc = ring_alloc_cells(r, capacity);
+    if (rc != 0) {
+        pthread_cond_destroy(&r->wait_cv);
+        pthread_mutex_destroy(&r->wait_mu);
+    }
+    return rc;
 }
 
 void awp_ring_destroy(awp_ring_t *r)
@@ -61,6 +100,8 @@ void awp_ring_destroy(awp_ring_t *r)
         return;
     free(r->cells);
     r->cells = NULL;
+    pthread_cond_destroy(&r->wait_cv);
+    pthread_mutex_destroy(&r->wait_mu);
 }
 
 void awp_ring_close(awp_ring_t *r)
@@ -68,9 +109,16 @@ void awp_ring_close(awp_ring_t *r)
     if (!r)
         return;
     atomic_store_explicit(&r->closed, 1, memory_order_release);
+    awp_ring_wake_all(r);
 }
 
-/* ---- push: single vs multi producer ------------------------------------- */
+void awp_ring_reopen(awp_ring_t *r)
+{
+    if (!r)
+        return;
+    atomic_store_explicit(&r->closed, 0, memory_order_release);
+    awp_ring_wake_all(r);
+}
 
 static int push_sp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
 {
@@ -96,10 +144,10 @@ static int push_sp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
         dif = (intptr_t)seq - (intptr_t)pos;
 
         if (dif == 0) {
-            /* Sole producer: claim with store (no CAS). */
             cell->data = frame;
             atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
             atomic_store_explicit(&r->enqueue_pos, pos + 1, memory_order_relaxed);
+            awp_ring_wake_all(r);
             if (blocked_ns_out)
                 *blocked_ns_out = did_block ? (awp_now_ns() - t0) : 0;
             return 0;
@@ -109,7 +157,12 @@ static int push_sp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
                 t0 = awp_now_ns();
                 did_block = 1;
             }
-            awp_backoff(spin++);
+            if (spin++ < AWP_SPIN_BUDGET)
+                awp_cpu_relax();
+            else {
+                awp_ring_wait_space(r);
+                spin = 0;
+            }
             continue;
         }
         awp_cpu_relax();
@@ -146,18 +199,24 @@ static int push_mp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
                 cell->data = frame;
                 atomic_store_explicit(&cell->sequence, pos + 1,
                                       memory_order_release);
+                awp_ring_wake_all(r);
                 if (blocked_ns_out)
                     *blocked_ns_out = did_block ? (awp_now_ns() - t0) : 0;
                 return 0;
             }
-            continue; /* lost CAS */
+            continue;
         }
         if (dif < 0) {
             if (!did_block) {
                 t0 = awp_now_ns();
                 did_block = 1;
             }
-            awp_backoff(spin++);
+            if (spin++ < AWP_SPIN_BUDGET)
+                awp_cpu_relax();
+            else {
+                awp_ring_wait_space(r);
+                spin = 0;
+            }
             continue;
         }
         awp_cpu_relax();
@@ -180,8 +239,6 @@ int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
     }
 }
 
-/* ---- pop: single vs multi consumer -------------------------------------- */
-
 static int pop_sc(awp_ring_t *r, awp_frame_t **out)
 {
     unsigned spin = 0;
@@ -203,6 +260,7 @@ static int pop_sc(awp_ring_t *r, awp_frame_t **out)
             cell->data = NULL;
             atomic_store_explicit(&cell->sequence, pos + r->capacity,
                                   memory_order_release);
+            awp_ring_wake_all(r);
             return 0;
         }
         if (dif < 0) {
@@ -213,7 +271,12 @@ static int pop_sc(awp_ring_t *r, awp_frame_t **out)
                     continue;
                 return -1;
             }
-            awp_backoff(spin++);
+            if (spin++ < AWP_SPIN_BUDGET)
+                awp_cpu_relax();
+            else {
+                awp_ring_wait_data(r);
+                spin = 0;
+            }
             continue;
         }
         awp_cpu_relax();
@@ -243,9 +306,10 @@ static int pop_mc(awp_ring_t *r, awp_frame_t **out)
                 cell->data = NULL;
                 atomic_store_explicit(&cell->sequence, pos + r->capacity,
                                       memory_order_release);
+                awp_ring_wake_all(r);
                 return 0;
             }
-            continue; /* lost CAS */
+            continue;
         }
         if (dif < 0) {
             if (atomic_load_explicit(&r->closed, memory_order_acquire)) {
@@ -253,10 +317,14 @@ static int pop_mc(awp_ring_t *r, awp_frame_t **out)
                 dif = (intptr_t)seq - (intptr_t)(pos + 1);
                 if (dif == 0)
                     continue;
-                /* Another consumer may still drain; if empty for us, exit. */
                 return -1;
             }
-            awp_backoff(spin++);
+            if (spin++ < AWP_SPIN_BUDGET)
+                awp_cpu_relax();
+            else {
+                awp_ring_wait_data(r);
+                spin = 0;
+            }
             continue;
         }
         awp_cpu_relax();
