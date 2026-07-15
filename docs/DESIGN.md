@@ -132,20 +132,21 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) |
 | 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design |
 
-### Pass 2 verdict (as implemented): **REJECT for production dispatch**
+### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
-Codex found **S0 lifecycle/UAF/data-loss** issues around shutdown, cancel, detach, and supervisor restart — not primarily in the ring sequence protocol itself.
+| Codex issue | Fix in tree |
+|-------------|-------------|
+| Free while submitters active | `RUNNING→QUIESCING→DRAINING→STOPPED` + `active_submits` |
+| Exit without drain | Workers process until closed+empty |
+| Cancel/detach UAF | No cancel in `process()`; quarantine stuck workers; leak-on-quarantine destroy |
+| Concurrent shutdown races | Waiters block until `STOPPED` |
+| Restart destroys queue | `awp_ring_reopen` keeps storage/backlog |
+| Indefinite spin | Hybrid spin then condvar park |
+| Silent truncation | `-E2BIG` / `-EINVAL` |
+| Hot-shard holds frames | Wait for ring space before frame acquire |
+| Callback reentrancy | TLS → `-EDEADLK` |
 
-**Top fixes called out:**
-1. Real lifecycle: `RUNNING → QUIESCING → DRAINING → STOPPED` + active-submit quiescence
-2. No unsafe cancel/detach while callbacks or submitters still touch pool state
-3. Supervisor: stable queues across worker generations; no destroy-backlog restart
-4. Tighten API: topology contract, statuses, reentrancy, delivery outcomes
-5. Hybrid wait (spin then park); requalify latency with ingress timestamps + real publisher
-
-**What Codex said is solid:** release/acquire cell protocol, default MPSC, one consumer per shard, FNV-1a routing, fixed-copy frames, no hot-path malloc, soft error isolation, modular split.
-
-**Mutex vs atomics (Codex):** at 1–5k msg/s, mutex/condvar or spin-then-park is likely the better *operational* default unless measured on dedicated CPUs; steady-state atomic ring can stay after lifecycle is fixed.
+E2E: `test_e2e_lifecycle` (drain, concurrent shutdown, restart progress).
 
 ## Build & verify
 
