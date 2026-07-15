@@ -98,14 +98,11 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
     atomic_store(&pool->shutting_down, 0);
     atomic_store(&pool->supervisor_alive, 0);
 
-    if (pthread_mutex_init(&pool->metrics_mu, NULL) != 0) {
-        free(pool);
-        return -ENOMEM;
-    }
-
     rc = copy_broadcast_feeds(pool, cfg);
-    if (rc != 0)
-        goto fail_metrics;
+    if (rc != 0) {
+        free(pool);
+        return rc;
+    }
 
     rc = awp_frame_pool_init(&pool->frames, cfg->frame_pool_size);
     if (rc != 0)
@@ -171,8 +168,6 @@ fail_frames:
     awp_frame_pool_destroy(&pool->frames);
 fail_feeds:
     free_broadcast_feeds(pool);
-fail_metrics:
-    pthread_mutex_destroy(&pool->metrics_mu);
     free(pool);
     return rc;
 }
@@ -259,27 +254,31 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out)
     if (!pool || !out)
         return -EINVAL;
 
-    pthread_mutex_lock(&pool->metrics_mu);
-    out->submitted = atomic_load(&pool->submitted);
-    out->dropped = atomic_load(&pool->dropped);
-    out->process_errors = atomic_load(&pool->process_errors);
-    out->shutdown_aborts = atomic_load(&pool->shutdown_aborts);
+    /* Snapshot atomics only — no mutex on the metrics path. */
+    out->submitted = atomic_load_explicit(&pool->submitted, memory_order_relaxed);
+    out->dropped = atomic_load_explicit(&pool->dropped, memory_order_relaxed);
+    out->process_errors =
+        atomic_load_explicit(&pool->process_errors, memory_order_relaxed);
+    out->shutdown_aborts =
+        atomic_load_explicit(&pool->shutdown_aborts, memory_order_relaxed);
     out->n_workers = pool->cfg.n_workers;
     out->workers = pool->metrics_buf;
     for (i = 0; i < pool->cfg.n_workers; i++) {
         awp_worker_t *w = &pool->workers[i];
         awp_worker_metrics_t *m = &pool->metrics_buf[i];
-        m->processed = atomic_load(&w->processed);
-        m->process_errors = atomic_load(&w->process_errors);
-        m->enqueue_blocks = atomic_load(&w->enqueue_blocks);
-        m->blocked_ns = atomic_load(&w->blocked_ns);
+        m->processed = atomic_load_explicit(&w->processed, memory_order_relaxed);
+        m->process_errors =
+            atomic_load_explicit(&w->process_errors, memory_order_relaxed);
+        m->enqueue_blocks =
+            atomic_load_explicit(&w->enqueue_blocks, memory_order_relaxed);
+        m->blocked_ns = atomic_load_explicit(&w->blocked_ns, memory_order_relaxed);
         m->queue_depth = awp_ring_depth(&w->queue);
-        m->queue_hwm = atomic_load(&w->queue_hwm);
-        m->restarts = atomic_load(&w->restarts);
-        m->last_progress_ns = atomic_load(&w->last_progress_ns);
-        m->alive = atomic_load(&w->alive);
+        m->queue_hwm = atomic_load_explicit(&w->queue_hwm, memory_order_relaxed);
+        m->restarts = atomic_load_explicit(&w->restarts, memory_order_relaxed);
+        m->last_progress_ns =
+            atomic_load_explicit(&w->last_progress_ns, memory_order_relaxed);
+        m->alive = atomic_load_explicit(&w->alive, memory_order_relaxed);
     }
-    pthread_mutex_unlock(&pool->metrics_mu);
     return 0;
 }
 
@@ -373,6 +372,5 @@ void awp_pool_destroy(awp_pool_t *pool)
     free(pool->metrics_buf);
     awp_frame_pool_destroy(&pool->frames);
     free_broadcast_feeds(pool);
-    pthread_mutex_destroy(&pool->metrics_mu);
     free(pool);
 }

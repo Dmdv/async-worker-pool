@@ -5,7 +5,7 @@ void *awp_worker_main(void *arg)
     awp_worker_t *w = (awp_worker_t *)arg;
     awp_pool_t *pool = w->pool;
 
-    /* Allow pthread_cancel at cond waits during force-shutdown. */
+    /* Cancel points: pthread_testcancel in ring spin backoff. */
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
     pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 
@@ -44,8 +44,7 @@ void *awp_worker_main(void *arg)
         prc = 0;
         if (pool->cfg.process) {
             /* Soft fault isolation: never abort the worker loop on error.
-             * Cancel stays DEFERRED (safe at cond waits). Process callbacks
-             * should observe shutting_down / return promptly on shutdown. */
+             * Process callbacks should observe shutting_down on shutdown. */
             prc = pool->cfg.process(frame, pool->cfg.user);
         }
         if (prc != 0) {

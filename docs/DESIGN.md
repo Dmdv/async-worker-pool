@@ -27,8 +27,8 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 | Path | Role |
 |------|------|
 | `include/awp/awp.h` | Public API |
-| `src/ring.c` | Bounded MPSC ring (mutex + condvar) |
-| `src/frame_pool.c` | Preallocated frame slab |
+| `src/ring.c` | Bounded MPSC ring (C11 atomics, sequence protocol) |
+| `src/frame_pool.c` | Preallocated frame slab (lock-free freelist) |
 | `src/shard.c` | FNV-1a + broadcast dedicated workers |
 | `src/worker.c` | Worker loop + portable timed join |
 | `src/supervisor.c` | Heartbeat / restart |
@@ -36,15 +36,18 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 
 ## Queue choice
 
-**Mutex + condvar bounded ring** (MPSC):
+**Atomic bounded MPSC ring** (Vyukov-style cell sequences, C11 `<stdatomic.h>`):
 
-- Multiple venue readers enqueue to the same worker → true MPSC
-- Full queue: `pthread_cond_wait(not_full)` — backpressure, zero drops
-- Empty: `pthread_cond_wait(not_empty)`
-- `pthread_cleanup_push` unlocks the mutex on cancel (cancel-safe)
-- Depth via `pthread_mutex_trylock` so observability never deadlocks
+- Multiple venue readers enqueue to the same worker → MPSC via CAS on `enqueue_pos`
+- Single consumer advances `dequeue_pos` (no CAS)
+- Full/empty: spin + `pause`/`yield` backoff — **backpressure, never drop**
+- Capacity rounded up to power of two; cells cache-line padded
+- Memory orders: acquire on sequence load, release after publishing data
+- Depth: lock-free `enqueue_pos - dequeue_pos`
 
-At 5k msg/s this easily meets the 5 ms p99 budget (bench: p99 ≈ 0.01 ms on a Mac laptop). A lock-free SPSC path can be added later if profiling demands it; correctness and multi-reader fan-in come first.
+**Why not mutex:** Codex recommended mutex+condvar as a correctness-first trade-off (same class of admission as Go’s runtime locks on channels). For a dispatch hot path we prefer atomics: no lock convoys, no condvar syscalls under load. Blocking is explicit spin/yield, not `pthread_mutex`.
+
+**Frame pool:** lock-free freelist of slab indices with ABA tags (Treiber-style packed head).
 
 ## Frame lifecycle
 
@@ -126,23 +129,17 @@ Independent architecture estimate via Codex CLI (`gpt-5.6-sol`, `model_reasoning
 1. “Never drop” applies to **queue admission**; soft `process()` errors recycle without end-to-end delivery guarantee.
 2. Portable pthreads cannot force-stop arbitrary callbacks safely — escalate cooperatively; cancel only at cleanup-protected wait points; process-level isolation for hard faults.
 
-**Agreements applied in this implementation:**
+**Codex recommended mutex MPSC first; we intentionally diverge on the hot path:**
 
-- Mutex+condvar MPSC as the correct first queue (multi-reader fan-in)
-- Frame object pool / fixed slots; no malloc on hot path
-- FNV-1a stable shard; N as skew headroom
-- Soft-error isolation; supervisor restart; deadline shutdown without `timedjoin_np`
-- Metrics focused on worst-worker occupancy
-- Cooperative stop before cancel; cleanup handlers on ring mutex
+| Option | Codex | This repo | Why |
+|--------|-------|-----------|-----|
+| Queue sync | mutex + condvar | **C11 atomics (sequence ring)** | Avoid lock/condvar cost on multi-reader dispatch |
+| Full/empty wait | condvar park | spin + yield backoff | Still never-drop; cancel via `pthread_testcancel` in backoff |
+| Frame pool | (mutex OK) | **lock-free freelist** | Same hot-path discipline |
+| Frame storage | fixed slots | fixed slots + copy | Unchanged lifetime model |
+| Shutdown | cooperative | cooperative first | Unchanged |
 
-**Trade-offs accepted:**
-
-| Option | Choice | Why |
-|--------|--------|-----|
-| SPSC per reader vs MPSC | MPSC mutex ring | N readers → one worker is the real topology |
-| Spin vs condvar park | Condvar | Correct backpressure; latency budget still met |
-| Frame copy vs pointer handoff | Copy into pool slot | Simple lifetime; fixed max payload |
-| Cancel vs cooperative death | Cooperative first | Avoids mutex leaks; cancel only as last resort |
+**Still aligned with Codex:** FNV-1a shard, N skew headroom, soft-error isolation, supervisor, bounded shutdown, worst-worker metrics.
 
 ## Build & verify
 

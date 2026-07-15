@@ -12,6 +12,8 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <unistd.h>
+#include <stdint.h>
+#include <sched.h>
 
 #ifndef AWP_CACHELINE
 #define AWP_CACHELINE 64
@@ -19,7 +21,7 @@
 
 #define AWP_ALIGN_CACHE alignas(AWP_CACHELINE)
 
-/* ---- time helpers ------------------------------------------------------- */
+/* ---- time / backoff ----------------------------------------------------- */
 
 static inline uint64_t awp_now_ns(void)
 {
@@ -32,29 +34,62 @@ static inline uint64_t awp_now_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-static inline void awp_ms_to_timespec(uint32_t ms, struct timespec *ts)
+static inline void awp_cpu_relax(void)
 {
-    clock_gettime(CLOCK_REALTIME, ts);
-    ts->tv_sec += ms / 1000u;
-    ts->tv_nsec += (long)(ms % 1000u) * 1000000L;
-    if (ts->tv_nsec >= 1000000000L) {
-        ts->tv_sec += 1;
-        ts->tv_nsec -= 1000000000L;
+#if defined(__x86_64__) || defined(__i386__)
+    __asm__ __volatile__("pause" ::: "memory");
+#elif defined(__aarch64__) || defined(__arm__)
+    __asm__ __volatile__("yield" ::: "memory");
+#else
+    /* no-op */
+#endif
+}
+
+/** Spin a bit, then yield — cancel point for force-shutdown. */
+static inline void awp_backoff(unsigned spin)
+{
+    if (spin < 64) {
+        unsigned i;
+        for (i = 0; i < (1u << (spin < 6 ? spin : 6)); i++)
+            awp_cpu_relax();
+    } else {
+        pthread_testcancel();
+        sched_yield();
     }
 }
 
-/* ---- bounded MPSC ring (mutex + condvar) -------------------------------- */
+static inline uint32_t awp_round_up_pow2(uint32_t v)
+{
+    if (v < 2)
+        return 2;
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    v |= v >> 8;
+    v |= v >> 16;
+    return v + 1;
+}
+
+/* ---- bounded MPSC ring (atomics, Vyukov-style sequences) ---------------- */
+
+/**
+ * Cache-line padded cell: sequence + data pointer.
+ * Producers CAS enqueue_pos; single consumer advances dequeue_pos.
+ * Memory orders: acquire on sequence load, release on sequence store after data.
+ */
+typedef struct awp_cell {
+    AWP_ALIGN_CACHE atomic_size_t sequence;
+    awp_frame_t *data;
+} awp_cell_t;
 
 typedef struct awp_ring {
-    awp_frame_t **slots;
-    uint32_t capacity;
-    uint32_t head; /* dequeue index */
-    uint32_t tail; /* enqueue index */
-    uint32_t count;
-    pthread_mutex_t mu;
-    pthread_cond_t  not_empty;
-    pthread_cond_t  not_full;
-    atomic_int closed; /* 1 after shutdown signal */
+    AWP_ALIGN_CACHE atomic_size_t enqueue_pos;
+    AWP_ALIGN_CACHE atomic_size_t dequeue_pos;
+    awp_cell_t *cells;
+    size_t capacity; /* power of two */
+    size_t mask;
+    atomic_int closed;
 } awp_ring_t;
 
 int  awp_ring_init(awp_ring_t *r, uint32_t capacity);
@@ -62,28 +97,27 @@ void awp_ring_destroy(awp_ring_t *r);
 void awp_ring_close(awp_ring_t *r);
 
 /**
- * Enqueue pointer. Blocks while full and not closed.
- * @return 0 ok, -1 closed/shutdown, -2 interrupted
+ * Enqueue pointer. Spins while full and not closed (backpressure, never drop).
+ * @return 0 ok, -1 closed/shutdown
  */
 int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out);
 
 /**
- * Dequeue. Blocks while empty and not closed.
+ * Dequeue. Spins while empty and not closed.
  * @return 0 ok, -1 closed and empty
  */
 int awp_ring_pop(awp_ring_t *r, awp_frame_t **out);
 
+/** Approximate depth (enqueue - dequeue); lock-free. */
 uint32_t awp_ring_depth(awp_ring_t *r);
 
-/* ---- frame object pool -------------------------------------------------- */
+/* ---- frame object pool (lock-free Treiber stack of indices) ------------- */
 
 typedef struct awp_frame_pool {
-    awp_frame_t *slab;       /* contiguous array */
-    awp_frame_t **free_list; /* stack of free pointers */
+    awp_frame_t *slab;
+    atomic_uint *next;           /* next free index chain */
+    atomic_uint_fast64_t head;   /* packed: tag<<32 | idx  (idx==0xFFFFFFFF empty) */
     uint32_t size;
-    uint32_t free_count;
-    pthread_mutex_t mu;
-    pthread_cond_t  has_free;
     atomic_int closed;
 } awp_frame_pool_t;
 
@@ -91,7 +125,7 @@ int  awp_frame_pool_init(awp_frame_pool_t *p, uint32_t size);
 void awp_frame_pool_destroy(awp_frame_pool_t *p);
 void awp_frame_pool_close(awp_frame_pool_t *p);
 
-/** Acquire a zeroed frame (blocks if exhausted until recycle or close). */
+/** Acquire a zeroed frame (spins if exhausted until recycle or close). */
 awp_frame_t *awp_frame_pool_acquire(awp_frame_pool_t *p);
 void awp_frame_pool_release(awp_frame_pool_t *p, awp_frame_t *f);
 
@@ -111,7 +145,7 @@ typedef struct awp_worker {
     atomic_uint_fast64_t last_progress_ns;
     atomic_uint_fast64_t restarts;
     atomic_int alive;
-    atomic_int stop; /* cooperative stop */
+    atomic_int stop;
 } awp_worker_t;
 
 struct awp_pool {
@@ -131,14 +165,11 @@ struct awp_pool {
     pthread_t supervisor;
     atomic_int supervisor_alive;
 
-    /* metrics snapshot buffer */
     awp_worker_metrics_t *metrics_buf;
-    pthread_mutex_t metrics_mu;
 
-    /* broadcast feed table (copied strings) */
     char **broadcast_feeds;
     uint32_t n_broadcast_feeds;
-    uint32_t shard_base; /* first worker index for symbol traffic */
+    uint32_t shard_base;
     uint32_t n_shard_workers;
 };
 

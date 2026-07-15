@@ -45,8 +45,8 @@ void *awp_supervisor_main(void *arg)
             idle_ms = (now > last) ? (now - last) / 1000000ull : 0;
             /*
              * Stall detection only when queue has work but no progress.
-             * Prefer cooperative stop (close ring) before cancel so mutexes
-             * are released via cleanup handlers at cond_wait cancel points.
+             * Prefer cooperative stop (close ring) so spin-waiters exit;
+             * cancel only if the worker remains stuck in process().
              */
             if (pool->cfg.enable_restart && idle_ms > stall_ms &&
                 awp_ring_depth(&w->queue) > 0) {
