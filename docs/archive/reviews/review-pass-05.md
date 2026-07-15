@@ -41,7 +41,7 @@ All checked-in HEAD-built test binaries passed, including `test_supervisor` (31/
 | Hot path uses atomics instead of mutexes ([DESIGN.md:58](docs/DESIGN.md:58)) | Every successful ring operation locks and broadcasts through `awp_ring_wake_all()`. |
 | Frame pool is unconditionally lock-free ([DESIGN.md:31](docs/DESIGN.md:31)) | `atomic_is_lock_free()` is recorded but neither enforced nor given a fallback. |
 
-[CODEX_PASS4_REVIEW.md](docs/CODEX_PASS4_REVIEW.md:24) is correctly presented as a historical review of `4b1076c`; it should remain historical.
+[review-pass-04.md](docs/review-pass-04.md:24) is correctly presented as a historical review of `4b1076c`; it should remain historical.
 
 ## Findings
 

@@ -23,7 +23,7 @@ Authoritative public wording lives in [`include/awp/awp.h`](../include/awp/awp.h
 
 **Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (`ACCEPT_WITH_NITS` on the reopen/reclaim series). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
 
-Historical Pass-by-Pass review dumps: `docs/CODEX_*.md` (commit-scoped; not the live API).
+Historical review dumps: [`docs/archive/reviews/`](archive/reviews/) (commit-scoped; not the live API).
 
 ## Why not N = cores?
 
@@ -68,7 +68,7 @@ Local benchmark numbers: [`BENCHMARKS.md`](BENCHMARKS.md).
 - Memory orders: acquire on sequence load, release after publishing data
 - Depth: lock-free `enqueue_pos - dequeue_pos`
 
-**Why not mutex:** Codex recommended mutex+condvar as a first-cut trade-off. Hot path uses atomics instead.
+**Why not mutex:** An early design estimate recommended mutex+condvar as a first-cut trade-off. Hot path uses atomics instead.
 
 **Frame pool:** lock-free freelist of slab indices with ABA tags (Treiber-style packed head).
 
@@ -146,7 +146,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 
 ## Historical reviews and residual mitigations
 
-Commit-scoped review artifacts: `docs/CODEX_*.md` (audit only; not the live contract). Final formal gate before productization: **ACCEPT_WITH_NITS**.
+Commit-scoped review artifacts: [`docs/archive/reviews/`](archive/reviews/) (audit only; not the live contract). Final formal gate before productization: accepted with residual nits.
 
 | Issue class (from early reviews) | Fix in tree |
 |----------------------------------|-------------|
@@ -168,7 +168,7 @@ Frame freelist uses a 32-bit ABA tag. Public qualification: **64-bit hosts** onl
 
 ### Pass 3 was **REJECT** — residual reclamation / reentrancy
 
-Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md)).
+Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`archive/reviews/implementation-review.md`](archive/reviews/implementation-review.md)).
 
 ### Pass 3 mitigations (post-review fix pass)
 
@@ -193,7 +193,7 @@ Key residual S0 after `4b1076c`:
 1. `STOPPED` published before shutdown finishes using `life_mu` → destroy can free under shutdown.
 2. Pre-registration / untracked public readers cannot be made safe by in-object counters alone; destroy must be externally serialized or use a stable handle.
 
-Full report: [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md).
+Full report: [`archive/reviews/review-pass-04.md`](archive/reviews/review-pass-04.md).
 
 
 

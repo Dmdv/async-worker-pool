@@ -93,7 +93,7 @@ stateDiagram-v2
   RUNNING --> RUNNING: concurrent shutdown waits for STOPPED
 ```
 
-**States (post Codex S0 fixes):**
+**States (post lifecycle S0 fixes):**
 
 | State | Meaning |
 |-------|---------|
@@ -162,4 +162,4 @@ Restart **reopens** the ring only while `RUNNING`; if shutdown wins mid-restart,
 
 - [`DESIGN.md`](DESIGN.md) — full architecture write-up
 - [`BENCHMARKS.md`](BENCHMARKS.md) — measured latency/throughput
-- [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) — S0/S1 findings and mitigations
+- [`archive/reviews/design-analysis.md`](archive/reviews/design-analysis.md) — historical S0/S1 findings and mitigations

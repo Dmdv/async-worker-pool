@@ -101,7 +101,7 @@ docs/diagrams/        Rendered PNG diagrams
 
 Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-Historical review notes under `docs/CODEX_*.md` are commit-scoped snapshots, not the live contract.
+Historical design reviews (audit only): [`docs/archive/reviews/`](docs/archive/reviews/).
 
 ## Build, test, install
 
