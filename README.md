@@ -101,7 +101,7 @@ docs/diagrams/        Rendered PNG diagrams
 | Backpressure | Block producer when full; `drops` must stay 0 |
 | Shutdown | Quiesce → close rings/pool → join under wait budget → **quarantine** stuck callbacks |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
+Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · market positioning: [`docs/PERFORMANCE_COMPARISON.md`](docs/PERFORMANCE_COMPARISON.md).
 
 Non-blocking residual nits (S3): [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) · [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
 

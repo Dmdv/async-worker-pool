@@ -50,7 +50,8 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 | `src/pool.c` | Create, submit, metrics, shutdown |
 
 Diagrams (architecture, submit path, lifecycle, ring modes, supervisor): [`DIAGRAMS.md`](DIAGRAMS.md).  
-Local benchmark numbers: [`BENCHMARKS.md`](BENCHMARKS.md).
+Local benchmark numbers: [`BENCHMARKS.md`](BENCHMARKS.md).  
+Market positioning vs queues / pools / HFT stacks: [`PERFORMANCE_COMPARISON.md`](PERFORMANCE_COMPARISON.md).
 
 ## Queue choice — all concurrency models
 
