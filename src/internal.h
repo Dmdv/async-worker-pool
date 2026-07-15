@@ -45,13 +45,14 @@ typedef enum awp_wstate {
 
 /* ---- time / backoff ----------------------------------------------------- */
 
+/** Monotonic ns when available; REALTIME only if CLOCK_MONOTONIC is absent. */
 static inline uint64_t awp_now_ns(void)
 {
     struct timespec ts;
 #if defined(CLOCK_MONOTONIC)
     clock_gettime(CLOCK_MONOTONIC, &ts);
 #else
-    clock_gettime(CLOCK_REALTIME, &ts);
+    clock_gettime(CLOCK_REALTIME, &ts); /* exotic / non-POSIX fallback */
 #endif
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }

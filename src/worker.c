@@ -96,9 +96,10 @@ int awp_worker_start(awp_worker_t *w)
  * Join thr by absolute CLOCK_MONOTONIC deadline.
  * @return 0 joined, 1 timed out (OS thread may still be reaped async), <0 error.
  *
- * Linux: pthread_timedjoin_np.
- * Elsewhere: detached heap helper performs join while this thread waits on a
- * cond with absolute budget — never detaches/cancels the target thread.
+ * All platforms: a detached heap helper runs pthread_join on thr while this
+ * thread polls with a pure CLOCK_MONOTONIC budget (no REALTIME timedjoin).
+ * Never detaches or cancels the target thread. On timeout, box ownership
+ * transfers to the helper so it can free itself after join completes.
  */
 typedef struct {
     pthread_t target;
@@ -164,7 +165,12 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
         awp_join_box_free(box);
         return -ENOMEM;
     }
-    (void)pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    rc = pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (rc != 0) {
+        pthread_attr_destroy(&attr);
+        awp_join_box_free(box);
+        return -rc;
+    }
     rc = pthread_create(&helper, &attr, awp_join_helper, box);
     pthread_attr_destroy(&attr);
     if (rc != 0) {
