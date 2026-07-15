@@ -130,10 +130,11 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 
 ## Codex reviews (gpt-5.6-sol xhigh)
 
-| Pass | Artifact | Scope |
-|------|----------|--------|
-| 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) |
-| 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design |
+| Pass | Artifact | Scope | Verdict |
+|------|----------|--------|---------|
+| 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) | plan |
+| 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design | **REJECT** (mitigations in `c11bab8`) |
+| 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -150,6 +151,20 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | Callback reentrancy | TLS → `-EDEADLK` |
 
 E2E: `test_e2e_lifecycle` (drain, concurrent shutdown, restart progress).
+
+### Pass 3 was **REJECT** — residual reclamation / reentrancy
+
+Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters:
+
+| Residual theme | Status (Pass 3) |
+|----------------|-----------------|
+| Free while submitters active | **PARTIAL** — deadline can enter `DRAINING` with `active_submits > 0` |
+| Cancel/detach UAF | **STILL OPEN** — shutdown quarantine flag not sticky for destroy leak path |
+| Concurrent shutdown / destroy | **PARTIAL** — `STOPPED` ≠ “no live references” |
+| Callback reentrancy | **PARTIAL** — destroy / `on_error` holes |
+| Restart queue storage | **FIXED** (`reopen`); backlog-safe restart still under-tested |
+
+See full findings and top-5 fix list in [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md).
 
 ## Build & verify
 
