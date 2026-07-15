@@ -198,13 +198,12 @@ int awp_pool_shutdown(awp_pool_t *pool);
  * the supervisor (if started) is joined. Otherwise storage is leaked
  * intentionally (sticky quarantine).
  *
- * Contract (lifetime ownership):
- * - Destroy is single-owner (concurrent/double destroy is a no-op).
- * - After quarantine, submit rejects (-EINVAL); storage may be leaked.
- * - Callers must not keep unjoined threads that still hold a pool pointer
- *   and race destroy without having entered an awp_* API (first-access
- *   race cannot be closed by in-object counters alone). Join producer
- *   threads before destroy, or only destroy after all users have finished.
+ * Contract (lifetime ownership — required for safe reclaim):
+ * - Destroy **exactly once**, from one thread, only after every other thread
+ *   that can hold or begin using the handle has finished (join producers
+ *   and any concurrent shutdown waiters first). Concurrent destroy on a
+ *   freed pointer is undefined; the library cannot make that safe.
+ * - After quarantine, new submits reject (-EINVAL); storage may be leaked.
  * - Not safe from process()/on_error() (marks quarantine, no free).
  */
 void awp_pool_destroy(awp_pool_t *pool);

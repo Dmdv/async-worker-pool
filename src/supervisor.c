@@ -36,11 +36,12 @@ static int restart_worker(awp_pool_t *pool, awp_worker_t *w)
         atomic_fetch_add(&w->restarts, 1);
         return 0;
     }
-    /* Restart failed: no consumer; reject further admission via quarantine. */
+    /* Restart failed: no consumer — close shard and reject admission. */
+    awp_ring_close(&w->queue);
     awp_pool_mark_quarantined(pool);
     atomic_store(&pool->supervisor_stop, 1); /* stop further restarts */
     fprintf(stderr,
-            "[awp] supervisor: worker %u restart failed; pool quarantined\n",
+            "[awp] supervisor: worker %u restart failed; shard closed, pool quarantined\n",
             w->id);
     return -1;
 }

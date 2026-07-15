@@ -137,6 +137,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** (fixes in `4b1076c`) |
 | 4 — re-review | [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md) | Post-fix re-review of impl + specs (`4b1076c`) | **REJECT** |
 | 5 — re-review | [`CODEX_PASS5_REVIEW.md`](CODEX_PASS5_REVIEW.md) | After Pass 4 fixes (`67a7148`) | **REJECT** |
+| 6 — re-review | [`CODEX_PASS6_REVIEW.md`](CODEX_PASS6_REVIEW.md) | After residual single-owner destroy (`0436973`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -194,6 +195,12 @@ Pass 5 (`67a7148`) closed local reclamation bookkeeping (STOPPED under `life_mu`
 - Quarantine must gate admission (submit reject) — addressed in follow-up.
 
 Follow-up on main: single-owner destroy, quarantine admission reject, create-rollback join-safe leak.
+
+
+
+### Pass 6 was **REJECT** — contract + supervisor teardown
+
+At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor unjoined still raced worker teardown. Follow-up: honest exactly-once destroy contract; skip worker close/join if supervisor unjoined; close shard on restart failure; recheck quarantine in submit loop; deadline residual drain.
 
 ## Build & verify
 

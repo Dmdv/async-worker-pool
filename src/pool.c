@@ -322,7 +322,9 @@ int awp_submit(awp_pool_t *pool,
     submit_ns = awp_now_ns(); /* retain across retries for honest latency */
 
     for (;;) {
-        if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
+        if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
+            atomic_load(&pool->quarantined) ||
+            atomic_load(&pool->destroy_started)) {
             atomic_fetch_sub(&pool->active_submits, 1);
             awp_api_leave(pool);
             return -EINVAL;
@@ -507,12 +509,14 @@ int awp_pool_shutdown(awp_pool_t *pool)
             else {
                 awp_pool_mark_quarantined(pool);
                 note_abort(pool, &aborts);
+                can_close = 0; /* do not race unjoined supervisor */
             }
         } else {
             awp_pool_mark_quarantined(pool);
             note_abort(pool, &aborts);
+            can_close = 0; /* supervisor may still join/reopen workers */
             fprintf(stderr,
-                    "[awp] shutdown: supervisor not joined; pool quarantined\n");
+                    "[awp] shutdown: supervisor not joined; skip worker teardown\n");
         }
     }
 
@@ -530,7 +534,9 @@ int awp_pool_shutdown(awp_pool_t *pool)
                 note_abort(pool, &aborts);
             if (atomic_load(&pool->workers[i].state) != AWP_W_QUARANTINED) {
                 awp_frame_t *f;
-                while (awp_ring_pop(&pool->workers[i].queue, &f) == 0 && f) {
+                /* Residual drain only while under absolute deadline. */
+                while (awp_now_ns() < deadline_ns &&
+                       awp_ring_pop(&pool->workers[i].queue, &f) == 0 && f) {
                     atomic_fetch_add(&pool->abandoned, 1);
                     awp_frame_pool_release(&pool->frames, f);
                 }
