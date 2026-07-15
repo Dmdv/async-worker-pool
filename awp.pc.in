@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: awp
+Description: Sharded low-latency async worker pool (C)
+Version: @VERSION@
+Libs: -L${libdir} -lawp -pthread
+Libs.private: -pthread
+Cflags: -I${includedir}

@@ -2,6 +2,10 @@
 
 _Thread_local int awp_tls_in_callback = 0;
 
+#ifdef AWP_TEST_HOOKS
+atomic_int awp_test_fail_next_worker_start = 0;
+#endif
+
 void *awp_worker_main(void *arg)
 {
     awp_worker_t *w = (awp_worker_t *)arg;
@@ -67,6 +71,14 @@ int awp_worker_start(awp_worker_t *w)
     int rc;
     if (!w)
         return -EINVAL;
+#ifdef AWP_TEST_HOOKS
+    /* Consume one fail-next token (test sets atomic to 1). */
+    if (atomic_exchange(&awp_test_fail_next_worker_start, 0) != 0) {
+        atomic_store(&w->state, AWP_W_JOINED);
+        atomic_store(&w->joined, 1);
+        return -EAGAIN;
+    }
+#endif
     atomic_store(&w->stop, 0);
     atomic_store(&w->joined, 0);
     atomic_store(&w->state, AWP_W_STARTING);

@@ -2,7 +2,7 @@
 
 **Sharded low-latency dispatch worker pool in C** — preallocated `pthread` workers, bounded per-worker queues, stable hash sharding for per-`(feed, symbol)` FIFO, blocking backpressure (zero drops), fault-isolated process callbacks, supervisor heartbeats, and bounded shutdown.
 
-Designed as the C equivalent of a permanent-worker market-data dispatch stage. Local microbench target: **p99 submit→process-return ≤ 5 ms** (closed-loop burst with light simulated work; not open-loop publisher-accept SLA).
+Designed as the C equivalent of a permanent-worker market-data dispatch stage. Local microbench target: **p99 submit→process-return ≤ 5 ms** (closed-loop burst with light simulated work; **not** open-loop publisher-accept SLA).
 
 ## Features
 
@@ -13,21 +13,40 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 - **Dedicated broadcast workers** for mark-price / funding-style feeds
 - **Soft fault isolation**: `process()` errors recycle the frame and continue
 - **Supervisor**: restarts dead/stalled workers; per-worker metrics
-- **Bounded shutdown** with hard deadline (portable, no Linux-only APIs)
+- **Bounded shutdown wait** then **quarantine** stuck callbacks (no cancel/detach)
 - **Runtime helper**: `awp_runtime_enabled()` / `AWP_ENABLED` (caller-owned; create is not gated)
+
+## Lifetime contract (read this before production use)
+
+| Rule | Meaning |
+|------|---------|
+| Destroy **exactly once** | One owner thread; after every other handle user has finished |
+| External quiescence | Join producers and concurrent shutdown waiters **before** destroy |
+| Shutdown deadline | Absolute **wait budget** only — does **not** kill `process()` |
+| Quarantine | Sticky; pool storage may leak; treat as **process recycle** |
+| `cfg.user` lifetime | Must remain valid until process exit if any callback may still run |
+
+Canonical owner sequence:
+
+1. Stop publishing the handle to new work; set the producer-stop condition.
+2. Call `awp_pool_shutdown()` from the designated owner; record its return value and metrics.
+3. Join every producer, metrics reader, and concurrent shutdown caller.
+4. Call `awp_pool_destroy()` exactly once.
+5. If shutdown returned `> 0`, preserve callback-owned state and normally **terminate/recycle the process**. Do not create replacement pools indefinitely in the same process.
 
 ## Quick start
 
 ```bash
-make          # libawp.a + tests + bench + example
-make check    # full suite
+make          # libawp.a + tests + bench + examples
+make check    # functional tests only (no latency gates)
+make check-all # functional + benches + examples
 ```
 
 ```c
 #include "awp/awp.h"
 
 static int on_frame(const awp_frame_t *f, void *user) {
-    /* e.g. natsConnection_PublishAsync(...) */
+    /* e.g. local publisher enqueue — do not retain f after return */
     (void)user; (void)f;
     return 0; /* non-zero = soft error; worker continues */
 }
@@ -35,6 +54,7 @@ static int on_frame(const awp_frame_t *f, void *user) {
 int main(void) {
     awp_config_t cfg;
     awp_pool_t *pool = NULL;
+    int shut;
 
     awp_config_init(&cfg);
     cfg.n_workers = 32;           /* skew headroom, not core count */
@@ -44,8 +64,11 @@ int main(void) {
 
     awp_pool_create(&cfg, &pool);
     awp_submit(pool, "trades", "BTCUSDT", payload, len, 0);
-    awp_pool_shutdown(pool);
+
+    shut = awp_pool_shutdown(pool); /* join producers first in real services */
     awp_pool_destroy(pool);
+    if (shut > 0)
+        return 2; /* quarantined: recycle process in production */
     return 0;
 }
 ```
@@ -57,10 +80,10 @@ See `examples/simple_publish.c` for multi-reader usage.
 ```
 include/awp/awp.h     Public API
 src/                  ring, frame pool, shard, worker, supervisor, pool
-tests/                unit + supervisor + e2e + lifecycle
-bench/                latency/throughput micro-benchmark
+tests/                unit + supervisor + e2e + lifecycle + contract drills
+bench/                closed-loop microbench + open-loop mock harness
 examples/             mock publish demo + per-mode demos
-docs/DESIGN.md        Architecture, sizing, test matrix
+docs/DESIGN.md        Architecture, lifecycle contract, test matrix
 docs/DIAGRAMS.md      Architecture / lifecycle / ring / supervisor diagrams
 docs/BENCHMARKS.md    Local latency & throughput results
 docs/diagrams/        Rendered PNG diagrams
@@ -74,36 +97,35 @@ docs/diagrams/        Rendered PNG diagrams
 | N workers | Config knob for **hash skew** headroom (e.g. 32), not `#cores` |
 | Ordering | Stable hash ⇒ one worker per key ⇒ FIFO by construction |
 | Backpressure | Block producer when full; `drops` must stay 0 |
-| Shutdown | Quiesce → close rings/pool (wake waiters) → join under deadline → **quarantine** stuck callbacks (no cancel/detach) |
+| Shutdown | Quiesce → close rings/pool → join under wait budget → **quarantine** stuck callbacks |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · Codex Pass 11/12: [`docs/CODEX_PASS11_REVIEW.md`](docs/CODEX_PASS11_REVIEW.md).
+Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
-## Tests, benchmarks, examples (all ring modes)
+Historical review notes under `docs/CODEX_*.md` are commit-scoped snapshots, not the live contract.
+
+## Build, test, install
+
+```bash
+make lib
+make check                 # functional correctness
+make check-sanitize        # ASan+UBSan (Clang/GCC)
+make check-bench           # optional microbench (not CI gate)
+make install PREFIX=/usr/local
+pkg-config --cflags --libs awp
+```
 
 | Artifact | Covers |
 |----------|--------|
-| `test_unit` | Baseline FIFO / backpressure / faults (default MPSC) |
-| `test_unit_modes [mode\|all]` | FIFO + backpressure + faults × **SPSC/MPSC/SPMC/MPMC** |
-| `test_ring_modes` | Raw ring multi-thread stress × all modes |
-| `test_e2e` | Multi-reader e2e (MPSC default) |
-| `test_e2e_modes [mode\|all]` | E2E × all modes (producer count matches topology) |
-| `test_supervisor` | Restart + bounded shutdown |
-| `bench_dispatch` | Latency bench (default MPSC) |
-| `bench_all_modes` | Pool throughput/p50/p99 table × all modes |
-| `bench_ring` | Raw ring ops/s × all modes |
-| `example_spsc` / `example_mpsc` / `example_spmc` / `example_mpmc` | Per-mode demos |
+| `test_unit` / `test_unit_modes` | FIFO, backpressure, faults × ring modes |
+| `test_ring_modes` | Raw ring stress with **exact ID** accounting |
+| `test_e2e*` / `test_supervisor` | Multi-reader, restart, sticky quarantine |
+| `test_e2e_lifecycle` | Drain + concurrent shutdown |
+| `test_teardown_contract` | Clean vs quarantined teardown drills |
+| `test_restart_create_fail` | Deterministic restart `pthread_create` failure |
+| `bench_dispatch` / `bench_all_modes` / `bench_ring` | Closed-loop microbench |
+| `bench_openloop` | Open-loop schedule + mock accept (not a real-publisher SLA) |
 
-```bash
-make check                          # full matrix
-./build/test_unit_modes spsc        # one mode
-./build/test_e2e_modes all
-./build/bench_all_modes 5000 1000 all
-./build/bench_ring 100000 mpmc
-./build/example_spsc && ./build/example_mpsc
-./build/example_spmc && ./build/example_mpmc
-```
-
-`cfg.ring_mode = AWP_RING_SPSC | MPSC | SPMC | MPMC` — pick the mode that matches **actual** producer/consumer counts.
+`cfg.ring_mode = AWP_RING_SPSC | MPSC | SPMC | MPMC` — match **actual** producer/consumer counts.
 
 ## License
 

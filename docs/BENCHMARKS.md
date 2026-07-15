@@ -1,6 +1,6 @@
 # Benchmark results
 
-Captured after `make check` (full unit / e2e / lifecycle / examples green).
+Captured after functional `make check` (correctness) plus optional `make check-bench`.
 
 | Field | Value |
 |-------|-------|
@@ -8,6 +8,8 @@ Captured after `make check` (full unit / e2e / lifecycle / examples green).
 | Date (UTC) | 2026-07-15T12:38:55Z |
 | Compiler | Apple clang 21.0.0 (clang-2100.1.1.101) |
 | Suite | `make check` + larger bench runs below |
+
+**Open-loop:** `bench_openloop` schedules arrivals at a fixed rate through AWP into a **mock** local accept. It is methodology scaffolding, **not** real-publisher-accept SLA evidence.
 
 ## Dispatch (pool) — bench_dispatch
 

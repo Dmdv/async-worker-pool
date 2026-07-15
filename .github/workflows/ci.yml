@@ -1,0 +1,40 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  linux-gcc:
+    name: Linux GCC functional
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Build + functional check
+        run: make clean && make CC=gcc check
+      - name: Install smoke
+        run: |
+          make install PREFIX=$PWD/stage
+          test -f stage/include/awp/awp.h
+          test -f stage/lib/libawp.a
+          test -f stage/lib/pkgconfig/awp.pc
+          pkg-config --with-path=$PWD/stage/lib/pkgconfig --exists awp
+          echo 'ok' > /dev/null
+
+  linux-asan:
+    name: Linux ASan+UBSan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: sudo apt-get update && sudo apt-get install -y build-essential
+      - name: Sanitizer functional suite
+        run: make clean && make CC=gcc check-sanitize
+        env:
+          # Quarantine tests intentionally leak pool storage under contract.
+          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1

@@ -2,6 +2,8 @@
 *.a
 *.dSYM/
 build/
+stage/
+awp.pc
 .scratch/
 .DS_Store
 *.log

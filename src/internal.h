@@ -203,8 +203,14 @@ extern _Thread_local int awp_tls_in_callback;
 void *awp_worker_main(void *arg);
 void *awp_supervisor_main(void *arg);
 int   awp_worker_start(awp_worker_t *w);
-/** Test/helper: reopen then re-close if pool is not RUNNING (Pass 10 invariant). */
+/** Test/helper: reopen then re-close if pool is not RUNNING (terminal invariant). */
 int   awp_test_post_reopen_terminal_check(awp_pool_t *pool, uint32_t worker_id);
+
+/* ---- test-only hooks (compile with -DAWP_TEST_HOOKS; never public ABI) ---- */
+#ifdef AWP_TEST_HOOKS
+/** If >0, next awp_worker_start fails without creating a thread (atomic_dec). */
+extern atomic_int awp_test_fail_next_worker_start;
+#endif
 /** Join with absolute deadline_ns (CLOCK_MONOTONIC). */
 int   awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted);
 

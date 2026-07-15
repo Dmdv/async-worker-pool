@@ -8,6 +8,13 @@
  *
  * Runtime helper: awp_runtime_enabled() reads AWP_ENABLED=1|true|yes.
  * Creation is not gated by the env var — callers decide whether to create.
+ *
+ * Lifetime contract (normative):
+ * - Destroy exactly once after every thread that can use the handle has finished.
+ * - shutdown_deadline_ms is an absolute wait budget before quarantine; it does
+ *   not cancel, detach, or terminate process() callbacks.
+ * - Quarantine is sticky: storage may leak; cfg.user and callback state must
+ *   remain valid until process exit (or process recycle after quarantine).
  */
 
 #ifndef AWP_AWP_H
@@ -119,7 +126,7 @@ typedef struct awp_config {
     uint32_t queue_capacity;      /**< Per-worker ring slots. Rounded up to power of two. */
     uint32_t frame_pool_size;     /**< Total preallocated frames (all workers). */
     awp_ring_mode_t ring_mode;    /**< Queue concurrency; default MPSC. */
-    uint32_t shutdown_deadline_ms;/**< Hard shutdown deadline (default 10000). */
+    uint32_t shutdown_deadline_ms;/**< Absolute shutdown wait budget ms (default 10000); then quarantine. */
     uint32_t supervisor_interval_ms; /**< Heartbeat check period (default 500). */
     uint32_t stall_threshold_ms;  /**< No progress → consider stalled (default 5000). */
     int      enable_supervisor;   /**< 1 = run supervisor thread (default 1). */
@@ -183,10 +190,16 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out);
 uint64_t awp_pool_drops(const awp_pool_t *pool);
 
 /**
- * Bounded shutdown: quiesce submits, drain workers up to deadline.
- * Workers stuck in process() are quarantined (no cancel/detach). If live
- * references remain after the deadline, destroy will intentionally leak.
- * @return 0 if all joined cleanly, >0 if some were quarantined/late, <0 on error.
+ * Bounded shutdown: close admission, drain workers up to shutdown_deadline_ms.
+ *
+ * The deadline is an **absolute wait budget** for join/drain only. It does not
+ * force-stop process() (no cancel/detach). Workers still inside process() at
+ * expiry are quarantined; destroy will intentionally leak pool storage.
+ *
+ * STOPPED means the public lifecycle is terminal; it does **not** imply all
+ * memory was reclaimed when quarantine is set.
+ *
+ * @return 0 if all joined cleanly, >0 if quarantined/late (aggregate), <0 error.
  */
 int awp_pool_shutdown(awp_pool_t *pool);
 
@@ -198,13 +211,19 @@ int awp_pool_shutdown(awp_pool_t *pool);
  * the supervisor (if started) is joined. Otherwise storage is leaked
  * intentionally (sticky quarantine).
  *
- * Contract (lifetime ownership — required for safe reclaim):
- * - Destroy **exactly once**, from one thread, only after every other thread
- *   that can hold or begin using the handle has finished (join producers
- *   and any concurrent shutdown waiters first). Concurrent destroy on a
- *   freed pointer is undefined; the library cannot make that safe.
+ * Owner protocol (required for safe reclaim):
+ * 1. Stop publishing the handle to new application work.
+ * 2. Call awp_pool_shutdown() from the designated owner; record the return value.
+ * 3. Join every producer, metrics reader, and concurrent shutdown waiter.
+ * 4. Call awp_pool_destroy() **exactly once**.
+ * 5. If shutdown returned >0, treat quarantine as process-recycle: keep cfg.user
+ *    and callback-owned state alive until process exit; do not assume reclaim.
+ *
+ * Additional rules:
+ * - Concurrent destroy on a freed pointer is undefined.
  * - After quarantine, new submits reject (-EINVAL); storage may be leaked.
  * - Not safe from process()/on_error() (marks quarantine, no free).
+ * - cfg.user must outlive any in-flight or quarantined process() call.
  */
 void awp_pool_destroy(awp_pool_t *pool);
 

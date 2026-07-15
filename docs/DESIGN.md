@@ -8,9 +8,22 @@ Preallocated, sharded dispatch stage for market-data frames:
 - Producer-side shard: `hash(feed, symbol) % N` → per-key **FIFO**
 - Bounded per-worker queues with **blocking backpressure** (never drop)
 - p99 **submit→process-return** ≤ **5 ms** on a closed-loop microbench (includes light simulated work; not open-loop publisher-accept)
-- Fault isolation, supervisor heartbeats, bounded shutdown
+- Fault isolation, supervisor heartbeats, bounded shutdown wait then quarantine
 
 This is the C analog of the Rust/tokio permanent-worker “Design A” pool.
+
+## Lifecycle contract (current HEAD)
+
+Authoritative public wording lives in [`include/awp/awp.h`](../include/awp/awp.h). Summary:
+
+1. **Exactly-once destroy** after external quiescence of every handle user.
+2. **`shutdown_deadline_ms`** is an absolute **join/drain wait budget** — not forced callback termination.
+3. **Quarantine** is sticky and may intentionally leak; treat unexpected quarantine as **process recycle**.
+4. **`cfg.user`** (and publisher state used from `process`) must outlive any quarantined callback.
+
+**Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (`ACCEPT_WITH_NITS` on the reopen/reclaim series). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
+
+Historical Pass-by-Pass review dumps: `docs/CODEX_*.md` (commit-scoped; not the live API).
 
 ## Why not N = cores?
 
@@ -88,16 +101,18 @@ Stable hash ⇒ same key ⇒ same worker ⇒ sequential process ⇒ **reorder di
 
 C has no `catch_unwind`. Soft errors **must** be error codes. Hard faults (SIGSEGV in third-party code) remain process-fatal; supervisor + metrics make silent dark buckets diagnosable when the thread simply exits or stalls. **Cancellation is disabled** inside workers.
 
-## Bounded shutdown
+## Bounded shutdown (wait budget, then quarantine)
 
 1. `RUNNING → QUIESCING` (reject new admits; wait `active_submits`)
 2. Stop supervisor; `DRAINING`
 3. Close frame pool + **all rings** (wake every parked producer/consumer wait)
-4. If supervisor joined and submits drained: join workers under absolute deadline; residual drain
-5. Else (timeout / unjoined supervisor): **quarantine** — rings closed, no join of stuck callbacks; destroy will leak
-6. `STOPPED`; destroy only if reclaimable (joined, no quarantine, no live API refs)
+4. If supervisor joined and submits drained: join workers under the absolute **wait budget**; residual drain
+5. Else (timeout / unjoined supervisor): **quarantine** — rings closed; stuck callbacks are not cancelled; destroy will leak
+6. `STOPPED`; reclaim on destroy only if joined, not quarantined, no live API refs
 
 Portable: no Linux-only `pthread_timedjoin_np` — poll state + sleep. **No force-stop via cancel/detach.**
+
+`STOPPED` means the public lifecycle is terminal. It does **not** mean all storage was reclaimed when quarantine is set.
 
 ## Observability
 
@@ -129,27 +144,12 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | p99 submit→process-return ≤ 5 ms, drops=0 | `bench_dispatch` (microbench) |
 | Terminal reopen re-closes | `test_terminal_reopen_recloses` |
 
-## Codex reviews (gpt-5.6-sol xhigh)
+## Historical reviews and residual mitigations
 
-| Pass | Artifact | Scope | Verdict |
-|------|----------|--------|---------|
-| 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) | plan |
-| 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design | **REJECT** (mitigations in `c11bab8`) |
-| 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** (fixes in `4b1076c`) |
-| 4 — re-review | [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md) | Post-fix re-review of impl + specs (`4b1076c`) | **REJECT** |
-| 5 — re-review | [`CODEX_PASS5_REVIEW.md`](CODEX_PASS5_REVIEW.md) | After Pass 4 fixes (`67a7148`) | **REJECT** |
-| 6 — re-review | [`CODEX_PASS6_REVIEW.md`](CODEX_PASS6_REVIEW.md) | After residual single-owner destroy (`0436973`) | **REJECT** |
-| 7 — re-review | [`CODEX_PASS7_REVIEW.md`](CODEX_PASS7_REVIEW.md) | After Pass 6 contract/teardown (`5c40ee8`) | **REJECT** |
-| 8 — re-review | [`CODEX_PASS8_REVIEW.md`](CODEX_PASS8_REVIEW.md) | After frame-pool wake (`b10c934`) | **REJECT** |
-| 9 — re-review | [`CODEX_PASS9_REVIEW.md`](CODEX_PASS9_REVIEW.md) | After stall ring close (`92f3b07`) | **REJECT** |
-| 10 — re-review | [`CODEX_PASS10_REVIEW.md`](CODEX_PASS10_REVIEW.md) | After all-rings close (`9dc1587`) | **REJECT** |
-| 11 — re-review | [`CODEX_PASS11_REVIEW.md`](CODEX_PASS11_REVIEW.md) | After reopen re-close (`6c9796a`) | **ACCEPT_WITH_NITS** |
-| 12 — nits | [`CODEX_PASS12_REVIEW.md`](CODEX_PASS12_REVIEW.md) | Docs/bench/tests nit cleanup (`eb19f04`) | **ACCEPT_WITH_NITS** |
+Commit-scoped review artifacts: `docs/CODEX_*.md` (audit only; not the live contract). Final formal gate before productization: **ACCEPT_WITH_NITS**.
 
-### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
-
-| Codex issue | Fix in tree |
-|-------------|-------------|
+| Issue class (from early reviews) | Fix in tree |
+|----------------------------------|-------------|
 | Free while submitters active | `RUNNING→QUIESCING→DRAINING→STOPPED` + `active_submits` |
 | Exit without drain | Workers process until closed+empty |
 | Cancel/detach UAF | No cancel in `process()`; quarantine stuck workers; leak-on-quarantine destroy |
@@ -160,7 +160,11 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | Hot-shard holds frames | Wait for ring space before frame acquire |
 | Callback reentrancy | TLS → `-EDEADLK` |
 
-E2E: `test_e2e_lifecycle` (drain, concurrent shutdown, restart progress).
+E2E: `test_e2e_lifecycle`, `test_teardown_contract`, `test_restart_create_fail`.
+
+### Finite freelist ABA tag
+
+Frame freelist uses a 32-bit ABA tag. Public qualification: **64-bit hosts** only. Stress tests do not prove safety across a full tag cycle.
 
 ### Pass 3 was **REJECT** — residual reclamation / reentrancy
 

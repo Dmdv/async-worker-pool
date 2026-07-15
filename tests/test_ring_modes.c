@@ -1,5 +1,6 @@
 /**
- * Exercise all ring concurrency modes: SPSC, MPSC, SPMC, MPMC.
+ * Exercise all ring concurrency modes with exact-ID accounting.
+ * offered == accepted == consumed == unique_seen; no dups/missing.
  */
 #include "awp/awp.h"
 #include "../src/internal.h"
@@ -20,22 +21,28 @@ static int g_passes;
     else g_passes++; \
 } while (0)
 
-static awp_frame_t g_frames[8192];
-static atomic_uint g_next_frame;
+#define MAX_IDS 8192
 
-static awp_frame_t *alloc_frame(void)
+static awp_frame_t g_frames[MAX_IDS];
+static atomic_uint g_next_frame;
+static atomic_int g_seen[MAX_IDS];
+static atomic_int g_dup;
+static atomic_int g_bad_id;
+
+static awp_frame_t *alloc_frame(uint64_t id)
 {
     uint32_t i = atomic_fetch_add(&g_next_frame, 1);
-    if (i >= 8192)
+    if (i >= MAX_IDS)
         return NULL;
     memset(&g_frames[i], 0, sizeof(g_frames[i]));
-    g_frames[i].seq = i;
+    g_frames[i].seq = id;
     return &g_frames[i];
 }
 
 typedef struct {
     awp_ring_t *r;
     int n_push;
+    uint64_t id_base;
     atomic_int *errors;
     atomic_int *consumed;
 } thr_args_t;
@@ -45,7 +52,8 @@ static void *producer(void *arg)
     thr_args_t *a = arg;
     int i;
     for (i = 0; i < a->n_push; i++) {
-        awp_frame_t *f = alloc_frame();
+        uint64_t id = a->id_base + (uint64_t)i;
+        awp_frame_t *f = alloc_frame(id);
         if (!f || awp_ring_push(a->r, f, NULL) != 0)
             atomic_fetch_add(a->errors, 1);
     }
@@ -59,8 +67,16 @@ static void *consumer(void *arg)
         awp_frame_t *f = NULL;
         if (awp_ring_pop(a->r, &f) != 0)
             break;
-        if (f)
-            atomic_fetch_add(a->consumed, 1);
+        if (!f)
+            continue;
+        if (f->seq >= MAX_IDS) {
+            atomic_fetch_add(&g_bad_id, 1);
+        } else {
+            int prev = atomic_exchange(&g_seen[f->seq], 1);
+            if (prev != 0)
+                atomic_fetch_add(&g_dup, 1);
+        }
+        atomic_fetch_add(a->consumed, 1);
     }
     return NULL;
 }
@@ -76,17 +92,27 @@ static const char *mode_name(awp_ring_mode_t mode)
     }
 }
 
+static void reset_ids(void)
+{
+    int i;
+    atomic_store(&g_next_frame, 0);
+    atomic_store(&g_dup, 0);
+    atomic_store(&g_bad_id, 0);
+    for (i = 0; i < MAX_IDS; i++)
+        atomic_store(&g_seen[i], 0);
+}
+
 static void test_mode(awp_ring_mode_t mode, int n_prod, int n_cons, int per)
 {
     awp_ring_t ring;
     thr_args_t pa[8], ca[8];
     pthread_t pt[8], ct[8];
     atomic_int errors, consumed;
-    int i, total_in;
+    int i, total_in, unique, missing;
 
     printf("test_ring %s prods=%d cons=%d per=%d\n",
            mode_name(mode), n_prod, n_cons, per);
-    atomic_store(&g_next_frame, 0);
+    reset_ids();
     atomic_init(&errors, 0);
     atomic_init(&consumed, 0);
     CHECK(awp_ring_init(&ring, 128, mode) == 0, "ring init");
@@ -96,6 +122,7 @@ static void test_mode(awp_ring_mode_t mode, int n_prod, int n_cons, int per)
     for (i = 0; i < n_cons; i++) {
         ca[i].r = &ring;
         ca[i].n_push = 0;
+        ca[i].id_base = 0;
         ca[i].errors = &errors;
         ca[i].consumed = &consumed;
         pthread_create(&ct[i], NULL, consumer, &ca[i]);
@@ -103,6 +130,7 @@ static void test_mode(awp_ring_mode_t mode, int n_prod, int n_cons, int per)
     for (i = 0; i < n_prod; i++) {
         pa[i].r = &ring;
         pa[i].n_push = per;
+        pa[i].id_base = (uint64_t)i * (uint64_t)per;
         pa[i].errors = &errors;
         pa[i].consumed = &consumed;
         pthread_create(&pt[i], NULL, producer, &pa[i]);
@@ -112,7 +140,7 @@ static void test_mode(awp_ring_mode_t mode, int n_prod, int n_cons, int per)
 
     {
         int spins = 0;
-        while ((int)atomic_load(&consumed) < total_in && spins < 200000) {
+        while ((int)atomic_load(&consumed) < total_in && spins < 500000) {
             spins++;
             sched_yield();
         }
@@ -121,8 +149,21 @@ static void test_mode(awp_ring_mode_t mode, int n_prod, int n_cons, int per)
     for (i = 0; i < n_cons; i++)
         pthread_join(ct[i], NULL);
 
+    unique = 0;
+    missing = 0;
+    for (i = 0; i < total_in; i++) {
+        if (atomic_load(&g_seen[i]) == 1)
+            unique++;
+        else
+            missing++;
+    }
+
     CHECK(atomic_load(&errors) == 0, "no push errors");
-    CHECK(atomic_load(&consumed) == total_in, "all frames consumed");
+    CHECK(atomic_load(&consumed) == total_in, "consumed == offered");
+    CHECK(unique == total_in, "unique_seen == offered");
+    CHECK(missing == 0, "no missing IDs");
+    CHECK(atomic_load(&g_dup) == 0, "no duplicate IDs");
+    CHECK(atomic_load(&g_bad_id) == 0, "no out-of-range IDs");
     CHECK((int)atomic_load(&g_next_frame) == total_in, "frame alloc count");
 
     awp_ring_destroy(&ring);
@@ -161,7 +202,6 @@ static void test_pool_all_modes(void)
         cfg.user = &count;
 
         CHECK(awp_pool_create(&cfg, &pool) == 0, "create");
-        /* Single-threaded submit is valid under every mode. */
         for (i = 0; i < N; i++) {
             char sym[16];
             snprintf(sym, sizeof(sym), "S%d", i % 8);
