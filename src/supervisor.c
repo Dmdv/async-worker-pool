@@ -121,9 +121,13 @@ void *awp_supervisor_main(void *arg)
                            atomic_load(&w->last_progress_ns) <= last) {
                     /* Still no progress since stall detection. */
                     atomic_store(&w->state, AWP_W_QUARANTINED);
+                    /* Wake producers parked on this full shard. */
+                    awp_ring_close(&w->queue);
                     awp_pool_mark_quarantined(pool);
+                    atomic_fetch_add(&pool->shutdown_aborts, 1);
                     fprintf(stderr,
-                            "[awp] supervisor: worker %u quarantined (no progress)\n",
+                            "[awp] supervisor: worker %u quarantined (no progress); "
+                            "shard closed\n",
                             w->id);
                 } else {
                     atomic_store(&w->stop, 0); /* healthy / recovering */

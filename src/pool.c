@@ -567,6 +567,11 @@ int awp_pool_shutdown(awp_pool_t *pool)
 
     /* Publish STOPPED only after all shutdown-side pool accesses are done. */
     set_life(pool, AWP_LIFE_STOPPED);
+    /* Surface prior quarantine (e.g. stall/restart) even if local aborts==0. */
+    if (aborts == 0 && atomic_load(&pool->shutdown_aborts) > 0)
+        aborts = (int)atomic_load(&pool->shutdown_aborts);
+    if (aborts == 0 && atomic_load(&pool->quarantined))
+        aborts = 1;
     return aborts;
 }
 
