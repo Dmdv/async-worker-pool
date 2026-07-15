@@ -57,10 +57,13 @@ See `examples/simple_publish.c` for multi-reader usage.
 ```
 include/awp/awp.h     Public API
 src/                  ring, frame pool, shard, worker, supervisor, pool
-tests/                unit + supervisor + e2e
+tests/                unit + supervisor + e2e + lifecycle
 bench/                latency/throughput micro-benchmark
-examples/             mock publish demo
+examples/             mock publish demo + per-mode demos
 docs/DESIGN.md        Architecture, sizing, test matrix
+docs/DIAGRAMS.md      Architecture / lifecycle / ring / supervisor diagrams
+docs/BENCHMARKS.md    Local latency & throughput results
+docs/diagrams/        Rendered PNG diagrams
 ```
 
 ## Design notes (short)
@@ -73,7 +76,7 @@ docs/DESIGN.md        Architecture, sizing, test matrix
 | Backpressure | Block producer when full; `drops` must stay 0 |
 | Shutdown | Signal → drain with deadline → force-stop stuck workers |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md).
+Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
 ## Tests, benchmarks, examples (all ring modes)
 

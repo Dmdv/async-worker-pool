@@ -27,12 +27,15 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 | Path | Role |
 |------|------|
 | `include/awp/awp.h` | Public API |
-| `src/ring.c` | Bounded MPSC ring (C11 atomics, sequence protocol) |
+| `src/ring.c` | Bounded multi-mode ring (C11 atomics, sequence protocol) |
 | `src/frame_pool.c` | Preallocated frame slab (lock-free freelist) |
 | `src/shard.c` | FNV-1a + broadcast dedicated workers |
 | `src/worker.c` | Worker loop + portable timed join |
 | `src/supervisor.c` | Heartbeat / restart |
 | `src/pool.c` | Create, submit, metrics, shutdown |
+
+Diagrams (architecture, submit path, lifecycle, ring modes, supervisor): [`DIAGRAMS.md`](DIAGRAMS.md).  
+Local benchmark numbers: [`BENCHMARKS.md`](BENCHMARKS.md).
 
 ## Queue choice — all concurrency models
 
