@@ -144,6 +144,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 9 — re-review | [`CODEX_PASS9_REVIEW.md`](CODEX_PASS9_REVIEW.md) | After stall ring close (`92f3b07`) | **REJECT** |
 | 10 — re-review | [`CODEX_PASS10_REVIEW.md`](CODEX_PASS10_REVIEW.md) | After all-rings close (`9dc1587`) | **REJECT** |
 | 11 — re-review | [`CODEX_PASS11_REVIEW.md`](CODEX_PASS11_REVIEW.md) | After reopen re-close (`6c9796a`) | **ACCEPT_WITH_NITS** |
+| 12 — nits | [`CODEX_PASS12_REVIEW.md`](CODEX_PASS12_REVIEW.md) | Docs/bench/tests nit cleanup (`eb19f04`) | **ACCEPT_WITH_NITS** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -214,9 +215,9 @@ At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor
 Restart-failure quarantine closed the shard but not the global frame freelist wait. Follow-up: `awp_pool_mark_quarantined` closes/wakes the frame pool; submit rechecks quarantine after acquire.
 
 
-### Pass 11 was **ACCEPT_WITH_NITS** → Pass 12 nits cleanup
+### Pass 11–12 **ACCEPT_WITH_NITS**
 
-Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Pass 12 addresses residual docs/bench honesty + reopen regression test.
+Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Pass 12 cleaned docs/bench/PNG/tests; residual nits if any are test-depth only.
 
 ## Build & verify
 
