@@ -125,28 +125,27 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | Multi-reader e2e, reorder=0 | `test_e2e` |
 | p99 ≤ 5 ms, drops=0 | `bench_dispatch` |
 
-## Codex estimate (gpt-5.6-sol xhigh)
+## Codex reviews (gpt-5.6-sol xhigh)
 
-Independent architecture estimate via Codex CLI (`gpt-5.6-sol`, `model_reasoning_effort=xhigh`). Full text: [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md).
+| Pass | Artifact | Scope |
+|------|----------|--------|
+| 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) |
+| 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design |
 
-**Effort (Codex):** ~34–49 person-days / ~124–190 focused AI-agent hours for production-grade lifecycle through publisher integration; phased 0–8 with mutex MPSC first.
+### Pass 2 verdict (as implemented): **REJECT for production dispatch**
 
-**Hard contradictions Codex called out (accepted as design truth):**
+Codex found **S0 lifecycle/UAF/data-loss** issues around shutdown, cancel, detach, and supervisor restart — not primarily in the ring sequence protocol itself.
 
-1. “Never drop” applies to **queue admission**; soft `process()` errors recycle without end-to-end delivery guarantee.
-2. Portable pthreads cannot force-stop arbitrary callbacks safely — escalate cooperatively; cancel only at cleanup-protected wait points; process-level isolation for hard faults.
+**Top fixes called out:**
+1. Real lifecycle: `RUNNING → QUIESCING → DRAINING → STOPPED` + active-submit quiescence
+2. No unsafe cancel/detach while callbacks or submitters still touch pool state
+3. Supervisor: stable queues across worker generations; no destroy-backlog restart
+4. Tighten API: topology contract, statuses, reentrancy, delivery outcomes
+5. Hybrid wait (spin then park); requalify latency with ingress timestamps + real publisher
 
-**Codex recommended mutex MPSC first; we intentionally diverge on the hot path:**
+**What Codex said is solid:** release/acquire cell protocol, default MPSC, one consumer per shard, FNV-1a routing, fixed-copy frames, no hot-path malloc, soft error isolation, modular split.
 
-| Option | Codex | This repo | Why |
-|--------|-------|-----------|-----|
-| Queue sync | mutex + condvar | **C11 atomics (sequence ring)** | Avoid lock/condvar cost on multi-reader dispatch |
-| Full/empty wait | condvar park | spin + yield backoff | Still never-drop; cancel via `pthread_testcancel` in backoff |
-| Frame pool | (mutex OK) | **lock-free freelist** | Same hot-path discipline |
-| Frame storage | fixed slots | fixed slots + copy | Unchanged lifetime model |
-| Shutdown | cooperative | cooperative first | Unchanged |
-
-**Still aligned with Codex:** FNV-1a shard, N skew headroom, soft-error isolation, supervisor, bounded shutdown, worst-worker metrics.
+**Mutex vs atomics (Codex):** at 1–5k msg/s, mutex/condvar or spin-then-park is likely the better *operational* default unless measured on dedicated CPUs; steady-state atomic ring can stay after lifecycle is fixed.
 
 ## Build & verify
 
