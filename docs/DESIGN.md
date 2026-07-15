@@ -7,7 +7,7 @@ Preallocated, sharded dispatch stage for market-data frames:
 - **N** long-lived `pthread` workers (created once)
 - Producer-side shard: `hash(feed, symbol) % N` → per-key **FIFO**
 - Bounded per-worker queues with **blocking backpressure** (never drop)
-- p99 **submit→process-entry** ≤ **5 ms** on a closed-loop microbench (not open-loop publisher-accept)
+- p99 **submit→process-return** ≤ **5 ms** on a closed-loop microbench (includes light simulated work; not open-loop publisher-accept)
 - Fault isolation, supervisor heartbeats, bounded shutdown
 
 This is the C analog of the Rust/tokio permanent-worker “Design A” pool.
@@ -126,7 +126,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | Bounded shutdown | `test_bounded_shutdown_stuck_worker` |
 | Supervisor restart | `test_supervisor_restart_dead_worker` |
 | Multi-reader e2e, reorder=0 | `test_e2e` |
-| p99 submit→process-entry ≤ 5 ms, drops=0 | `bench_dispatch` (microbench) |
+| p99 submit→process-return ≤ 5 ms, drops=0 | `bench_dispatch` (microbench) |
 | Terminal reopen re-closes | `test_terminal_reopen_recloses` |
 
 ## Codex reviews (gpt-5.6-sol xhigh)

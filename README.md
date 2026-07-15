@@ -2,7 +2,7 @@
 
 **Sharded low-latency dispatch worker pool in C** — preallocated `pthread` workers, bounded per-worker queues, stable hash sharding for per-`(feed, symbol)` FIFO, blocking backpressure (zero drops), fault-isolated process callbacks, supervisor heartbeats, and bounded shutdown.
 
-Designed as the C equivalent of a permanent-worker market-data dispatch stage. Local microbench target: **p99 submit→process-entry ≤ 5 ms** (closed-loop burst; not open-loop publisher-accept SLA).
+Designed as the C equivalent of a permanent-worker market-data dispatch stage. Local microbench target: **p99 submit→process-return ≤ 5 ms** (closed-loop burst with light simulated work; not open-loop publisher-accept SLA).
 
 ## Features
 

@@ -327,13 +327,10 @@ static void test_terminal_reopen_recloses(void)
         TEST_CHECK(atomic_load(&pool->workers[i].queue.closed) == 1,
                    "rings closed after shutdown");
 
-    /* Simulate late supervisor reopen after terminal close. */
+    /* Late reopen + production helper used by restart_worker. */
     awp_ring_reopen(&pool->workers[0].queue);
     TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 0, "reopen opens");
-
-    /* Same post-reopen lifecycle check as restart_worker. */
-    if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING)
-        awp_ring_close(&pool->workers[0].queue);
+    TEST_EQ_I(awp_test_post_reopen_terminal_check(pool, 0), 1, "terminal re-close");
     TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 1,
                "re-closed after terminal lifecycle check");
 
@@ -342,37 +339,47 @@ static void test_terminal_reopen_recloses(void)
 }
 
 /** Stuck process + short deadline → quarantine; rings must be closed. */
+static atomic_int g_life_hang;
+
+static int hang_no_ctx_process(const awp_frame_t *frame, void *user)
+{
+    (void)frame;
+    (void)user;
+    while (atomic_load(&g_life_hang))
+        test_sleep_ms(10);
+    return 0;
+}
+
 static void test_quarantine_path_closes_rings(void)
 {
     awp_config_t cfg;
     awp_pool_t *pool = NULL;
-    test_ctx_t ctx;
     uint32_t i;
     int rc;
 
     printf("e2e_lifecycle sticky hang shutdown closes rings\n");
-    test_ctx_init(&ctx);
-    atomic_store(&ctx.hang, 1);
+    atomic_store(&g_life_hang, 1);
     awp_config_init(&cfg);
-    cfg.n_workers = 1;
+    cfg.n_workers = 2;
     cfg.queue_capacity = 8;
     cfg.frame_pool_size = 16;
     cfg.enable_supervisor = 0;
     cfg.shutdown_deadline_ms = 300;
-    cfg.process = test_process;
-    cfg.user = &ctx;
+    cfg.process = hang_no_ctx_process;
 
     TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
     TEST_EQ_I(awp_submit(pool, "t", "s", "x", 1, 0), 0, "submit stuck");
     test_sleep_ms(50);
     rc = awp_pool_shutdown(pool);
     TEST_CHECK(rc > 0, "shutdown reports abort/quarantine");
+    TEST_CHECK(atomic_load(&pool->quarantined) == 1, "pool quarantined");
     for (i = 0; i < pool->cfg.n_workers; i++)
         TEST_CHECK(atomic_load(&pool->workers[i].queue.closed) == 1,
-                   "ring closed on quarantine path");
-    atomic_store(&ctx.hang, 0);
+                   "all rings closed on quarantine path");
+    /* Destroy may leak; clear hang only after so no use-after-free of test state. */
     awp_pool_destroy(pool);
-    test_ctx_destroy(&ctx);
+    atomic_store(&g_life_hang, 0);
+    test_sleep_ms(50); /* allow leaked worker to exit if still running */
 }
 
 int main(void)
