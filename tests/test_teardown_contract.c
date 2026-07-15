@@ -130,11 +130,81 @@ static void test_multi_stuck_one_deadline(void)
     test_sleep_ms(50);
 }
 
+/*
+ * F6: producer blocked on full queue + stuck worker; shutdown must wake
+ * the producer (join after shutdown, not before).
+ */
+typedef struct {
+    awp_pool_t *pool;
+    atomic_int entered;
+    atomic_int finished;
+    int submit_rc;
+} blocked_arg_t;
+
+static void *blocked_submitter(void *arg)
+{
+    blocked_arg_t *a = arg;
+    atomic_store(&a->entered, 1);
+    a->submit_rc = awp_submit(a->pool, "t", "HOT", "y", 1, 0);
+    atomic_store(&a->finished, 1);
+    return NULL;
+}
+
+static void test_shutdown_wakes_blocked_submitter(void)
+{
+    awp_config_t cfg;
+    awp_pool_t *pool = NULL;
+    blocked_arg_t ba;
+    pthread_t th;
+    int i, shut;
+
+    printf("teardown shutdown wakes blocked submitter\n");
+    atomic_store(&g_sticky, 1);
+    awp_config_init(&cfg);
+    cfg.n_workers = 1;
+    cfg.queue_capacity = 2; /* tiny ring */
+    cfg.frame_pool_size = 16;
+    cfg.enable_supervisor = 0;
+    cfg.shutdown_deadline_ms = 500;
+    cfg.process = sticky_process;
+
+    TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
+    /*
+     * capacity=2: sticky holds one in process; two more fill the ring.
+     * The extra submitter thread then parks (does not block the test thread).
+     */
+    TEST_EQ_I(awp_submit(pool, "t", "HOT", "x", 1, 0), 0, "sticky submit");
+    test_sleep_ms(40);
+    TEST_EQ_I(awp_submit(pool, "t", "HOT", "x", 1, 0), 0, "queue slot 1");
+    TEST_EQ_I(awp_submit(pool, "t", "HOT", "x", 1, 0), 0, "queue slot 2 (full)");
+
+    ba.pool = pool;
+    atomic_init(&ba.entered, 0);
+    atomic_init(&ba.finished, 0);
+    ba.submit_rc = 0;
+    TEST_EQ_I(pthread_create(&th, NULL, blocked_submitter, &ba), 0, "thread");
+    for (i = 0; i < 100 && !atomic_load(&ba.entered); i++)
+        test_sleep_ms(5);
+    TEST_CHECK(atomic_load(&ba.entered) == 1, "submitter entered");
+    test_sleep_ms(20);
+    TEST_CHECK(atomic_load(&ba.finished) == 0, "still blocked before shutdown");
+
+    shut = awp_pool_shutdown(pool);
+    TEST_CHECK(shut > 0, "shutdown >0 with sticky");
+    pthread_join(th, NULL);
+    TEST_CHECK(atomic_load(&ba.finished) == 1, "submitter finished after shutdown");
+    /* Rejected or completed after close is OK; hang is not. */
+    awp_pool_destroy(pool);
+    atomic_store(&g_sticky, 0);
+    test_sleep_ms(50);
+}
+
 int main(void)
 {
     test_clean_teardown_owner_protocol();
     test_quarantine_teardown_process_recycle();
     test_multi_stuck_one_deadline();
+    test_shutdown_wakes_blocked_submitter();
     printf("\nteardown_contract: %d passed, %d failed\n", g_passes, g_fails);
     return g_fails ? 1 : 0;
 }

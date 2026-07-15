@@ -157,7 +157,7 @@ Commit-scoped review artifacts: [`docs/archive/reviews/`](archive/reviews/) (aud
 | Restart destroys queue | `awp_ring_reopen` keeps storage/backlog |
 | Indefinite spin | Hybrid spin then condvar park |
 | Silent truncation | `-E2BIG` / `-EINVAL` |
-| Hot-shard holds frames | Wait for ring space before frame acquire |
+| Hot-shard holds frames | `try_push`: release frame before parking on full ring |
 | Callback reentrancy | TLS → `-EDEADLK` |
 
 E2E: `test_e2e_lifecycle`, `test_teardown_contract`, `test_restart_create_fail`.
@@ -226,5 +226,7 @@ Library-internal permanent-block/UAF findings under the exactly-once destroy con
 ## Build & verify
 
 ```bash
-make check   # unit + supervisor + e2e + bench + example
+make check           # functional tests only (no latency gates)
+make check-bench     # optional microbench + examples
+make check-sanitize  # ASan+UBSan functional suite
 ```

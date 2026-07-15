@@ -3,9 +3,13 @@
 CC      ?= cc
 AR      ?= ar
 RANLIB  ?= ranlib
+# User-overridable flags. Mandatory -I/-pthread always appended (override).
 CFLAGS  ?= -O2 -g -Wall -Wextra -Wpedantic -std=c11
-CFLAGS  += -Iinclude -pthread
-LDFLAGS += -pthread
+LDFLAGS ?=
+EXTRA_CFLAGS  ?=
+EXTRA_LDFLAGS ?=
+override CFLAGS  += -Iinclude -pthread $(EXTRA_CFLAGS)
+override LDFLAGS += -pthread $(EXTRA_LDFLAGS)
 
 PREFIX  ?= /usr/local
 DESTDIR ?=
@@ -17,7 +21,7 @@ VERSION       := $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_PATCH)
 
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Linux)
-  CFLAGS += -D_GNU_SOURCE
+  override CFLAGS += -D_GNU_SOURCE
 endif
 
 SRC := src/ring.c src/frame_pool.c src/shard.c src/worker.c src/supervisor.c src/pool.c
@@ -172,20 +176,47 @@ check-bench: bench examples
 check-all: check-func check-bench
 	@echo "ALL CHECKS PASSED"
 
-# ASan+UBSan functional suite. Quarantine intentional-leak cases run in-process
-# but LeakSanitizer may report the sticky path; prefer detect_leaks=0 for that
-# binary only when needed. Default: full suite with leak detection on clean paths.
+# ASan+UBSan functional suite.
+# Clean-path tests: LSan on. Quarantine tests: LSan off (intentional leak).
+SAN_CFLAGS  := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
+SAN_LDFLAGS := -fsanitize=address,undefined
+
 check-sanitize:
 	$(MAKE) clean
-	$(MAKE) CFLAGS="$(CFLAGS) -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer" \
-		LDFLAGS="$(LDFLAGS) -fsanitize=address,undefined" check-func
+	$(MAKE) EXTRA_CFLAGS="$(SAN_CFLAGS)" EXTRA_LDFLAGS="$(SAN_LDFLAGS)" \
+		tests
+	@echo "=== LSan ON (clean functional subset) ==="
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_UNIT)
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_UNIT_MODES) all
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_RING)
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_E2E)
+	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_E2E_MODES) all
+	@echo "=== LSan OFF (quarantine / intentional-leak paths) ==="
+	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_SUP)
+	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_E2E_LIFE)
+	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_TEARDOWN)
+	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+		$(TEST_RESTART_FAIL)
+	@echo "SANITIZE CHECKS PASSED"
 
-pkgconfig: awp.pc
+pkgconfig: force-awp-pc
+	@true
 
-awp.pc: awp.pc.in
-	sed -e 's|@PREFIX@|$(PREFIX)|g' -e 's|@VERSION@|$(VERSION)|g' $< > $@
+# Always regenerate so PREFIX changes are never stale.
+force-awp-pc: awp.pc.in
+	sed -e 's|@PREFIX@|$(PREFIX)|g' -e 's|@VERSION@|$(VERSION)|g' awp.pc.in > awp.pc
 
-install: lib pkgconfig
+awp.pc: force-awp-pc
+
+install: lib force-awp-pc
 	install -d $(DESTDIR)$(PREFIX)/include/awp
 	install -d $(DESTDIR)$(PREFIX)/lib/pkgconfig
 	install -m 644 include/awp/awp.h $(DESTDIR)$(PREFIX)/include/awp/awp.h

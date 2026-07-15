@@ -330,7 +330,7 @@ static void test_terminal_reopen_recloses(void)
     /* Late reopen + production helper used by restart_worker. */
     awp_ring_reopen(&pool->workers[0].queue);
     TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 0, "reopen opens");
-    TEST_EQ_I(awp_test_post_reopen_terminal_check(pool, 0), 1, "terminal re-close");
+    TEST_EQ_I(awp_post_reopen_terminal_check(pool, 0), 1, "terminal re-close");
     TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 1,
                "re-closed after terminal lifecycle check");
 

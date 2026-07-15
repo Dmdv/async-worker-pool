@@ -15,6 +15,8 @@
  *   not cancel, detach, or terminate process() callbacks.
  * - Quarantine is sticky: storage may leak; cfg.user and callback state must
  *   remain valid until process exit (or process recycle after quarantine).
+ * - Frame freelist: lock-free where the platform provides a lock-free 64-bit
+ *   atomic; 32-bit ABA tag; public qualification is 64-bit hosts only.
  */
 
 #ifndef AWP_AWP_H
@@ -86,7 +88,7 @@ typedef struct awp_worker_metrics {
     uint64_t queue_hwm;        /**< High-water mark. */
     uint64_t restarts;         /**< Supervisor restarts of this worker. */
     uint64_t last_progress_ns; /**< Last successful process or dequeue. */
-    int      alive;            /**< 1 if thread running. */
+    int      alive;            /**< 1 if thread may still run (incl. quarantined callback). */
 } awp_worker_metrics_t;
 
 /** Aggregate pool metrics. */

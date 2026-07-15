@@ -11,7 +11,7 @@ static int life_is_running(awp_pool_t *pool)
  * the ring so producers cannot re-park on a full open shard. Returns 0 if
  * still running, 1 if re-closed (terminal).
  */
-int awp_test_post_reopen_terminal_check(awp_pool_t *pool, uint32_t worker_id)
+int awp_post_reopen_terminal_check(awp_pool_t *pool, uint32_t worker_id)
 {
     awp_worker_t *w;
     if (!pool || worker_id >= pool->cfg.n_workers)
@@ -53,7 +53,7 @@ static int restart_worker(awp_pool_t *pool, awp_worker_t *w)
     /* Preserve backlog: reopen if closed, keep cells. */
     awp_ring_reopen(&w->queue);
     atomic_store(&w->last_progress_ns, awp_now_ns());
-    if (awp_test_post_reopen_terminal_check(pool, w->id) != 0)
+    if (awp_post_reopen_terminal_check(pool, w->id) != 0)
         return -1;
     if (awp_worker_start(w) == 0) {
         atomic_fetch_add(&w->restarts, 1);
@@ -81,6 +81,7 @@ void *awp_supervisor_main(void *arg)
                             : 5000;
 
     /* Joined flag is owned by shutdown/create, not rewritten here. */
+    atomic_store(&pool->supervisor_phase, 2); /* alive */
     atomic_store(&pool->supervisor_alive, 1);
 
     while (life_is_running(pool)) {
@@ -164,6 +165,7 @@ void *awp_supervisor_main(void *arg)
         }
     }
 
+    atomic_store(&pool->supervisor_phase, 3); /* exited / joinable */
     atomic_store(&pool->supervisor_alive, 0);
     pthread_mutex_lock(&pool->life_mu);
     pthread_cond_broadcast(&pool->life_cv);

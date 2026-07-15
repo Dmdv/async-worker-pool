@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
-        run: sudo apt-get update && sudo apt-get install -y build-essential
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config
       - name: Build + functional check
         run: make clean && make CC=gcc check
       - name: Install smoke
@@ -23,18 +23,18 @@ jobs:
           test -f stage/lib/libawp.a
           test -f stage/lib/pkgconfig/awp.pc
           pkg-config --with-path=$PWD/stage/lib/pkgconfig --exists awp
-          echo 'ok' > /dev/null
+          printf '%s\n' '#include "awp/awp.h"' 'static int p(const awp_frame_t *f,void *u){(void)f;(void)u;return 0;}' \
+            'int main(void){awp_config_t c;awp_pool_t *pool=0;awp_config_init(&c);c.n_workers=1;c.queue_capacity=8;c.frame_pool_size=16;c.enable_supervisor=0;c.process=p;if(awp_pool_create(&c,&pool)!=0)return 1;awp_pool_shutdown(pool);awp_pool_destroy(pool);return 0;}' \
+            > /tmp/awp_consumer.c
+          cc -O2 /tmp/awp_consumer.c $(pkg-config --with-path=$PWD/stage/lib/pkgconfig --cflags --libs awp) -o /tmp/awp_consumer
+          /tmp/awp_consumer
 
   linux-asan:
-    name: Linux ASan+UBSan
+    name: Linux ASan+UBSan (split LSan)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install toolchain
         run: sudo apt-get update && sudo apt-get install -y build-essential
-      - name: Sanitizer functional suite
+      - name: Sanitizer suite (clean LSan on; quarantine LSan off)
         run: make clean && make CC=gcc check-sanitize
-        env:
-          # Quarantine tests intentionally leak pool storage under contract.
-          ASAN_OPTIONS: detect_leaks=0:halt_on_error=1
-          UBSAN_OPTIONS: halt_on_error=1

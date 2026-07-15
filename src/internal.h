@@ -178,7 +178,13 @@ struct awp_pool {
     atomic_int api_refs; /* live public API calls (submit/metrics/...) */
     atomic_int shutdown_waiters; /* concurrent shutdown callers waiting STOPPED */
     atomic_int supervisor_stop;
-    atomic_int supervisor_alive;
+    atomic_int supervisor_alive; /* 1 while supervisor main is in its loop */
+    /**
+     * Supervisor lifecycle phase:
+     * 0 = none, 1 = starting (pre-create through first instruction),
+     * 2 = alive (in main loop), 3 = exited (about to return / joinable).
+     */
+    atomic_int supervisor_phase;
     atomic_int supervisor_joined; /* 1 if no supervisor or join completed */
     atomic_int supervisor_started; /* 1 after pthread_create of supervisor succeeds */
     atomic_int quarantined; /* 1 ⇒ destroy must leak; submit rejects */
@@ -203,16 +209,18 @@ extern _Thread_local int awp_tls_in_callback;
 void *awp_worker_main(void *arg);
 void *awp_supervisor_main(void *arg);
 int   awp_worker_start(awp_worker_t *w);
-/** Test/helper: reopen then re-close if pool is not RUNNING (terminal invariant). */
-int   awp_test_post_reopen_terminal_check(awp_pool_t *pool, uint32_t worker_id);
+/** After reopen: re-close ring if pool is no longer RUNNING (terminal invariant). */
+int   awp_post_reopen_terminal_check(awp_pool_t *pool, uint32_t worker_id);
 
 /* ---- test-only hooks (compile with -DAWP_TEST_HOOKS; never public ABI) ---- */
 #ifdef AWP_TEST_HOOKS
 /** If >0, next awp_worker_start fails without creating a thread (atomic_dec). */
 extern atomic_int awp_test_fail_next_worker_start;
 #endif
-/** Join with absolute deadline_ns (CLOCK_MONOTONIC). */
+/** Join with absolute deadline_ns (CLOCK_MONOTONIC); may quarantine on timeout. */
 int   awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted);
+/** Join a detached-from-pool pthread with absolute deadline; 0 ok, 1 timed out. */
+int   awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns);
 
 /** Sticky leak flag: pool storage must not be reclaimed; wake parked submitters. */
 static inline void awp_pool_mark_quarantined(awp_pool_t *pool)

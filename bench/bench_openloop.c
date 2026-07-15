@@ -95,7 +95,7 @@ int main(int argc, char **argv)
         count = atoi(argv[2]);
     if (argc > 3)
         workers = atoi(argv[3]);
-    if (rate <= 0 || count <= 0 || workers <= 0) {
+    if (rate <= 0.0 || count <= 0 || workers <= 0) {
         fprintf(stderr, "usage: %s [rate] [count] [workers]\n", argv[0]);
         return 2;
     }
@@ -192,40 +192,41 @@ int main(int argc, char **argv)
     printf("accounting: offered=%d submit_ok=%d accepts=%llu accept_err=%d samples_ok=%zu\n",
            offered, submit_ok, (unsigned long long)atomic_load(&g_accepts),
            atomic_load(&g_accept_err), n_ok);
-    printf("exact: offered==submit_ok==accepts? %s\n",
-           (offered == submit_ok &&
-            (uint64_t)submit_ok == atomic_load(&g_accepts) &&
-            atomic_load(&g_accept_err) == 0)
-               ? "YES"
-               : "NO");
-    printf("generator lateness p50=%.3fms p99=%.3fms late_runs>%lldns=%d\n",
-           pct(lateness, (size_t)count, 0.50) / 1e6,
-           pct(lateness, (size_t)count, 0.99) / 1e6,
-           (long long)interval_ns, late_invalid);
-    if (n_ok > 0) {
-        printf("submit→accept p50=%.3fms p95=%.3fms p99=%.3fms\n",
-               pct(lat_submit_accept, n_ok, 0.50) / 1e6,
-               pct(lat_submit_accept, n_ok, 0.95) / 1e6,
-               pct(lat_submit_accept, n_ok, 0.99) / 1e6);
-        printf("sched→accept  p50=%.3fms p95=%.3fms p99=%.3fms\n",
-               pct(lat_sched_accept, n_ok, 0.50) / 1e6,
-               pct(lat_sched_accept, n_ok, 0.95) / 1e6,
-               pct(lat_sched_accept, n_ok, 0.99) / 1e6);
-    }
-
     {
-        awp_pool_metrics_t m;
-        if (awp_pool_get_metrics(pool, &m) == 0)
-            printf("drops=%llu process_errors=%llu shutdown_aborts=%llu\n",
-                   (unsigned long long)m.dropped,
-                   (unsigned long long)m.process_errors,
-                   (unsigned long long)m.shutdown_aborts);
-    }
+        int exact_ok = (offered == submit_ok &&
+                        (uint64_t)submit_ok == atomic_load(&g_accepts) &&
+                        atomic_load(&g_accept_err) == 0);
+        printf("exact: offered==submit_ok==accepts? %s\n",
+               exact_ok ? "YES" : "NO");
+        printf("generator lateness p50=%.3fms p99=%.3fms late_runs>%lldns=%d\n",
+               pct(lateness, (size_t)count, 0.50) / 1e6,
+               pct(lateness, (size_t)count, 0.99) / 1e6,
+               (long long)interval_ns, late_invalid);
+        if (n_ok > 0) {
+            printf("submit→accept p50=%.3fms p95=%.3fms p99=%.3fms\n",
+                   pct(lat_submit_accept, n_ok, 0.50) / 1e6,
+                   pct(lat_submit_accept, n_ok, 0.95) / 1e6,
+                   pct(lat_submit_accept, n_ok, 0.99) / 1e6);
+            printf("sched→accept  p50=%.3fms p95=%.3fms p99=%.3fms\n",
+                   pct(lat_sched_accept, n_ok, 0.50) / 1e6,
+                   pct(lat_sched_accept, n_ok, 0.95) / 1e6,
+                   pct(lat_sched_accept, n_ok, 0.99) / 1e6);
+        }
 
-    awp_pool_destroy(pool);
-    free(g_samples);
-    free(lat_submit_accept);
-    free(lat_sched_accept);
-    free(lateness);
-    return 0;
+        {
+            awp_pool_metrics_t m;
+            if (awp_pool_get_metrics(pool, &m) == 0)
+                printf("drops=%llu process_errors=%llu shutdown_aborts=%llu\n",
+                       (unsigned long long)m.dropped,
+                       (unsigned long long)m.process_errors,
+                       (unsigned long long)m.shutdown_aborts);
+        }
+
+        awp_pool_destroy(pool);
+        free(g_samples);
+        free(lat_submit_accept);
+        free(lat_sched_accept);
+        free(lateness);
+        return exact_ok ? 0 : 1;
+    }
 }

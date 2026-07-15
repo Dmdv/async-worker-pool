@@ -92,22 +92,73 @@ int awp_worker_start(awp_worker_t *w)
     return 0;
 }
 
-static int join_exited(awp_worker_t *w)
+/**
+ * Join thr by absolute CLOCK_MONOTONIC deadline.
+ * @return 0 joined, 1 timed out (thread not joined), <0 other error.
+ */
+int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
+{
+#if defined(__linux__) && defined(_GNU_SOURCE)
+    for (;;) {
+        struct timespec abs;
+        uint64_t now = awp_now_ns();
+        uint64_t rem;
+        int rc;
+        if (now >= deadline_ns)
+            return 1;
+        rem = deadline_ns - now;
+        if (clock_gettime(CLOCK_REALTIME, &abs) != 0)
+            return -errno;
+        abs.tv_sec += (time_t)(rem / 1000000000ull);
+        abs.tv_nsec += (long)(rem % 1000000000ull);
+        if (abs.tv_nsec >= 1000000000L) {
+            abs.tv_sec += 1;
+            abs.tv_nsec -= 1000000000L;
+        }
+        rc = pthread_timedjoin_np(thr, NULL, &abs);
+        if (rc == 0)
+            return 0;
+        if (rc == ETIMEDOUT)
+            return 1;
+        if (rc == EINTR)
+            continue;
+        return -rc;
+    }
+#else
+    /* Portable: if budget already exhausted, refuse unbounded join. */
+    if (awp_now_ns() >= deadline_ns)
+        return 1;
+    {
+        int rc = pthread_join(thr, NULL);
+        return rc == 0 ? 0 : -rc;
+    }
+#endif
+}
+
+static int join_exited_deadline(awp_worker_t *w, uint64_t deadline_ns)
 {
     int rc;
     if (atomic_load(&w->joined))
         return 0;
-    rc = pthread_join(w->thread, NULL);
-    if (rc != 0) {
-        awp_pool_mark_quarantined(w->pool);
-        fprintf(stderr,
-                "[awp] worker %u pthread_join failed (%d); quarantined\n",
-                w->id, rc);
-        return -rc;
+    rc = awp_pthread_join_deadline(w->thread, deadline_ns);
+    if (rc == 0) {
+        atomic_store(&w->joined, 1);
+        atomic_store(&w->state, AWP_W_JOINED);
+        return 0;
     }
-    atomic_store(&w->joined, 1);
-    atomic_store(&w->state, AWP_W_JOINED);
-    return 0;
+    if (rc == 1) {
+        awp_pool_mark_quarantined(w->pool);
+        atomic_store(&w->state, AWP_W_QUARANTINED);
+        fprintf(stderr,
+                "[awp] worker %u join past deadline; quarantined (not joined)\n",
+                w->id);
+        return 1;
+    }
+    awp_pool_mark_quarantined(w->pool);
+    fprintf(stderr,
+            "[awp] worker %u pthread_join failed (%d); quarantined\n",
+            w->id, -rc);
+    return -rc;
 }
 
 int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted)
@@ -142,7 +193,7 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
 
     st = atomic_load(&w->state);
     if (st == AWP_W_EXITED || st == AWP_W_JOINED) {
-        int rc = join_exited(w);
+        int rc = join_exited_deadline(w, deadline_ns);
         if (rc != 0) {
             if (aborted)
                 *aborted = 1;
@@ -151,16 +202,13 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
         return 0;
     }
 
-    /* Still running past deadline: cooperative stop + close; grace within remaining budget. */
+    /* Still running past deadline: cooperative stop + close; grace within budget. */
     atomic_store(&w->stop, 1);
     awp_ring_close(&w->queue);
     {
         uint64_t grace_end = deadline_ns;
         uint64_t now = awp_now_ns();
-        /* Small grace only if budget remains; never extend past absolute deadline. */
-        if (grace_end < now + 50000000ull && grace_end > now)
-            ; /* use remaining only */
-        else if (grace_end > now + 200000000ull)
+        if (grace_end > now + 200000000ull)
             grace_end = now + 200000000ull; /* cap 200ms when budget allows */
         while ((atomic_load(&w->state) == AWP_W_RUNNING ||
                 atomic_load(&w->state) == AWP_W_STARTING) &&
@@ -170,10 +218,11 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
         }
     }
     if (atomic_load(&w->state) == AWP_W_EXITED) {
-        int rc = join_exited(w);
+        int rc = join_exited_deadline(w, deadline_ns);
         if (aborted)
             *aborted = 1;
-        return rc != 0 ? 1 : 1;
+        (void)rc;
+        return 1;
     }
 
     atomic_store(&w->state, AWP_W_QUARANTINED);

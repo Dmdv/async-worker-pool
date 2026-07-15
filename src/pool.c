@@ -97,6 +97,8 @@ static int wait_until_stopped(awp_pool_t *pool)
     while (atomic_load(&pool->lifecycle) != AWP_LIFE_STOPPED)
         pthread_cond_wait(&pool->life_cv, &pool->life_mu);
     aborts = (int)atomic_load(&pool->shutdown_aborts);
+    if (aborts == 0 && atomic_load(&pool->quarantined))
+        aborts = 1;
     atomic_fetch_sub(&pool->shutdown_waiters, 1);
     pthread_cond_broadcast(&pool->life_cv); /* wake destroy waiter */
     pthread_mutex_unlock(&pool->life_mu);
@@ -107,6 +109,17 @@ static void note_abort(awp_pool_t *pool, int *aborts)
 {
     (*aborts)++;
     atomic_fetch_add(&pool->shutdown_aborts, 1);
+}
+
+/** Ensure quarantine is visible on every shutdown return path. */
+static void persist_quarantine_abort(awp_pool_t *pool)
+{
+    uint_fast64_t zero = 0;
+    if (!atomic_load(&pool->quarantined))
+        return;
+    /* If counter is still 0, publish at least 1 (process-recycle signal). */
+    (void)atomic_compare_exchange_strong(&pool->shutdown_aborts, &zero,
+                                         (uint_fast64_t)1);
 }
 
 int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
@@ -147,6 +160,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
     atomic_store(&pool->shutdown_waiters, 0);
     atomic_store(&pool->supervisor_stop, 0);
     atomic_store(&pool->supervisor_alive, 0);
+    atomic_store(&pool->supervisor_phase, 0); /* none */
     atomic_store(&pool->supervisor_joined, 1);
     atomic_store(&pool->supervisor_started, 0);
     atomic_store(&pool->quarantined, 0);
@@ -214,8 +228,10 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
 
     if (cfg->enable_supervisor) {
         atomic_store(&pool->supervisor_joined, 0);
+        atomic_store(&pool->supervisor_phase, 1); /* starting before create */
         rc = pthread_create(&pool->supervisor, NULL, awp_supervisor_main, pool);
         if (rc != 0) {
+            atomic_store(&pool->supervisor_phase, 0);
             atomic_store(&pool->supervisor_joined, 1);
             rc = -rc;
             goto fail_running;
@@ -431,7 +447,11 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out)
         m->restarts = atomic_load_explicit(&w->restarts, memory_order_relaxed);
         m->last_progress_ns =
             atomic_load_explicit(&w->last_progress_ns, memory_order_relaxed);
-        m->alive = (st == AWP_W_RUNNING || st == AWP_W_STARTING) ? 1 : 0;
+        /* Quarantined callbacks may still execute; report as live. */
+        m->alive = (st == AWP_W_RUNNING || st == AWP_W_STARTING ||
+                    st == AWP_W_QUARANTINED)
+                       ? 1
+                       : 0;
     }
     pthread_mutex_unlock(&pool->metrics_mu);
     awp_api_leave(pool);
@@ -466,8 +486,12 @@ int awp_pool_shutdown(awp_pool_t *pool)
         return -EDEADLK;
 
     life = atomic_load(&pool->lifecycle);
-    if (life == AWP_LIFE_STOPPED)
-        return (int)atomic_load(&pool->shutdown_aborts);
+    if (life == AWP_LIFE_STOPPED) {
+        int aborts = (int)atomic_load(&pool->shutdown_aborts);
+        if (aborts == 0 && atomic_load(&pool->quarantined))
+            aborts = 1;
+        return aborts;
+    }
     if (life == AWP_LIFE_QUIESCING || life == AWP_LIFE_DRAINING)
         return wait_until_stopped(pool);
 
@@ -510,24 +534,42 @@ int awp_pool_shutdown(awp_pool_t *pool)
 
     if (pool->cfg.enable_supervisor && atomic_load(&pool->supervisor_started) &&
         !atomic_load(&pool->supervisor_joined)) {
-        while (atomic_load(&pool->supervisor_alive) && awp_now_ns() < deadline_ns) {
-            struct timespec ts = { .tv_sec = 0, .tv_nsec = 2 * 1000 * 1000 };
-            nanosleep(&ts, NULL);
+        int phase;
+        /* Wait for exited (or past start) within absolute budget. */
+        while (awp_now_ns() < deadline_ns) {
+            phase = atomic_load(&pool->supervisor_phase);
+            if (phase == 3) /* exited */
+                break;
+            if (phase == 0 && !atomic_load(&pool->supervisor_alive))
+                break;
+            {
+                struct timespec ts = { .tv_sec = 0, .tv_nsec = 2 * 1000 * 1000 };
+                nanosleep(&ts, NULL);
+            }
         }
-        if (!atomic_load(&pool->supervisor_alive)) {
-            if (pthread_join(pool->supervisor, NULL) == 0)
+        phase = atomic_load(&pool->supervisor_phase);
+        if (phase == 3 ||
+            (phase != 1 && phase != 2 && !atomic_load(&pool->supervisor_alive))) {
+            /* Joinable: budget-aware join. */
+            int jrc = awp_pthread_join_deadline(pool->supervisor, deadline_ns);
+            if (jrc == 0)
                 atomic_store(&pool->supervisor_joined, 1);
             else {
                 awp_pool_mark_quarantined(pool);
                 note_abort(pool, &aborts);
-                can_close = 0; /* do not race unjoined supervisor */
+                can_close = 0;
+                fprintf(stderr,
+                        "[awp] shutdown: supervisor join timeout/error; "
+                        "skip worker teardown\n");
             }
         } else {
+            /* Still starting or alive past deadline. */
             awp_pool_mark_quarantined(pool);
             note_abort(pool, &aborts);
-            can_close = 0; /* supervisor may still join/reopen workers */
+            can_close = 0;
             fprintf(stderr,
-                    "[awp] shutdown: supervisor not joined; skip worker teardown\n");
+                    "[awp] shutdown: supervisor not exited by deadline; "
+                    "skip worker teardown\n");
         }
     }
 
@@ -569,6 +611,8 @@ int awp_pool_shutdown(awp_pool_t *pool)
     if (any_worker_quarantined(pool) || atomic_load(&pool->active_submits) > 0)
         awp_pool_mark_quarantined(pool);
 
+    persist_quarantine_abort(pool);
+
     /* Publish STOPPED only after all shutdown-side pool accesses are done. */
     set_life(pool, AWP_LIFE_STOPPED);
     /* Return the higher of local aborts and cumulative pool counter. */
@@ -591,6 +635,7 @@ void awp_pool_destroy(awp_pool_t *pool)
 
     if (awp_tls_in_callback) {
         awp_pool_mark_quarantined(pool);
+        persist_quarantine_abort(pool);
         fprintf(stderr,
                 "[awp] destroy called from callback; marking quarantine (no free)\n");
         return;

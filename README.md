@@ -9,7 +9,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 - **N fixed workers** created once (never per message)
 - **Producer-side shard**: FNV-1a(`feed || 0x1F || symbol`) → worker index
 - **Bounded atomic rings** — **SPSC / MPSC / SPMC / MPMC** (`ring_mode`), sequence protocol, spin/yield backpressure, **never drop**
-- **Preallocated frame pool** (lock-free freelist) — no `malloc`/`free` on the hot path
+- **Preallocated frame pool** (lock-free freelist where supported; 32-bit ABA tag; **64-bit hosts**) — no `malloc`/`free` on the hot path
 - **Dedicated broadcast workers** for mark-price / funding-style feeds
 - **Soft fault isolation**: `process()` errors recycle the frame and continue
 - **Supervisor**: restarts dead/stalled workers; per-worker metrics
@@ -65,7 +65,9 @@ int main(void) {
     awp_pool_create(&cfg, &pool);
     awp_submit(pool, "trades", "BTCUSDT", payload, len, 0);
 
-    shut = awp_pool_shutdown(pool); /* join producers first in real services */
+    /* Real services: stop producers, shutdown (wakes blocked submits), then join. */
+    shut = awp_pool_shutdown(pool);
+    /* join producers / metrics threads here if any */
     awp_pool_destroy(pool);
     if (shut > 0)
         return 2; /* quarantined: recycle process in production */
