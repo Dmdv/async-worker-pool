@@ -75,23 +75,32 @@ docs/DESIGN.md        Architecture, sizing, test matrix
 
 Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md).
 
-## Tests & benchmarks
+## Tests, benchmarks, examples (all ring modes)
+
+| Artifact | Covers |
+|----------|--------|
+| `test_unit` | Baseline FIFO / backpressure / faults (default MPSC) |
+| `test_unit_modes [mode\|all]` | FIFO + backpressure + faults × **SPSC/MPSC/SPMC/MPMC** |
+| `test_ring_modes` | Raw ring multi-thread stress × all modes |
+| `test_e2e` | Multi-reader e2e (MPSC default) |
+| `test_e2e_modes [mode\|all]` | E2E × all modes (producer count matches topology) |
+| `test_supervisor` | Restart + bounded shutdown |
+| `bench_dispatch` | Latency bench (default MPSC) |
+| `bench_all_modes` | Pool throughput/p50/p99 table × all modes |
+| `bench_ring` | Raw ring ops/s × all modes |
+| `example_spsc` / `example_mpsc` / `example_spmc` / `example_mpmc` | Per-mode demos |
 
 ```bash
-./build/test_unit
-./build/test_supervisor
-./build/test_e2e
-./build/bench_dispatch 3000 1000   # msgs keys
-AWP_ENABLED=1 ./build/simple_publish
+make check                          # full matrix
+./build/test_unit_modes spsc        # one mode
+./build/test_e2e_modes all
+./build/bench_all_modes 5000 1000 all
+./build/bench_ring 100000 mpmc
+./build/example_spsc && ./build/example_mpsc
+./build/example_spmc && ./build/example_mpmc
 ```
 
-Typical laptop result (illustrative):
-
-```
-bench_dispatch: msgs=3000 keys=1000 workers=32
-  latency_ms: p50≈0.003 p99≈0.01   target p99 ≤ 5.0 → PASS
-  drops=0
-```
+`cfg.ring_mode = AWP_RING_SPSC | MPSC | SPMC | MPMC` — pick the mode that matches **actual** producer/consumer counts.
 
 ## License
 
