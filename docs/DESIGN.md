@@ -142,6 +142,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 8 — re-review | [`CODEX_PASS8_REVIEW.md`](CODEX_PASS8_REVIEW.md) | After frame-pool wake (`b10c934`) | **REJECT** |
 | 9 — re-review | [`CODEX_PASS9_REVIEW.md`](CODEX_PASS9_REVIEW.md) | After stall ring close (`92f3b07`) | **REJECT** |
 | 10 — re-review | [`CODEX_PASS10_REVIEW.md`](CODEX_PASS10_REVIEW.md) | After all-rings close (`9dc1587`) | **REJECT** |
+| 11 — re-review | [`CODEX_PASS11_REVIEW.md`](CODEX_PASS11_REVIEW.md) | After reopen re-close (`6c9796a`) | **ACCEPT_WITH_NITS** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -210,6 +211,11 @@ At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor
 ### Pass 7 was **REJECT** — frame-pool wait domain
 
 Restart-failure quarantine closed the shard but not the global frame freelist wait. Follow-up: `awp_pool_mark_quarantined` closes/wakes the frame pool; submit rechecks quarantine after acquire.
+
+
+### Pass 11 was **ACCEPT_WITH_NITS**
+
+Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Residual: DESIGN/diagram wording (cancel/detach), bench methodology honesty, deeper adversarial tests.
 
 ## Build & verify
 

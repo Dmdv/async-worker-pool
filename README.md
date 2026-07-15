@@ -76,7 +76,7 @@ docs/diagrams/        Rendered PNG diagrams
 | Backpressure | Block producer when full; `drops` must stay 0 |
 | Shutdown | Signal → drain with deadline → force-stop stuck workers |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · Codex Pass 3: [`docs/CODEX_IMPLEMENTATION_REVIEW.md`](docs/CODEX_IMPLEMENTATION_REVIEW.md) · Pass 4: [`docs/CODEX_PASS4_REVIEW.md`](docs/CODEX_PASS4_REVIEW.md) (**REJECT**).
+Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · Codex Pass 3: [`docs/CODEX_IMPLEMENTATION_REVIEW.md`](docs/CODEX_IMPLEMENTATION_REVIEW.md) · Codex loop Pass 11: [`docs/CODEX_PASS11_REVIEW.md`](docs/CODEX_PASS11_REVIEW.md) (**ACCEPT_WITH_NITS**).
 
 ## Tests, benchmarks, examples (all ring modes)
 
