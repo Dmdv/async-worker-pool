@@ -66,10 +66,14 @@ static int copy_broadcast_feeds(awp_pool_t *pool, const awp_config_t *cfg)
     return 0;
 }
 
+/**
+ * Publish lifecycle under life_mu so STOPPED is not observable until
+ * broadcast setup is complete (closes destroy-vs-set_life UAF).
+ */
 static void set_life(awp_pool_t *pool, int life)
 {
-    atomic_store(&pool->lifecycle, life);
     pthread_mutex_lock(&pool->life_mu);
+    atomic_store(&pool->lifecycle, life);
     pthread_cond_broadcast(&pool->life_cv);
     pthread_mutex_unlock(&pool->life_mu);
 }
@@ -84,20 +88,32 @@ static int any_worker_quarantined(const awp_pool_t *pool)
     return 0;
 }
 
-static void wait_until_stopped(awp_pool_t *pool)
+/** Wait for STOPPED; sample aborts while still synchronized. */
+static int wait_until_stopped(awp_pool_t *pool)
 {
-    atomic_fetch_add(&pool->shutdown_waiters, 1);
+    int aborts;
     pthread_mutex_lock(&pool->life_mu);
+    atomic_fetch_add(&pool->shutdown_waiters, 1);
     while (atomic_load(&pool->lifecycle) != AWP_LIFE_STOPPED)
         pthread_cond_wait(&pool->life_cv, &pool->life_mu);
-    pthread_mutex_unlock(&pool->life_mu);
+    aborts = (int)atomic_load(&pool->shutdown_aborts);
     atomic_fetch_sub(&pool->shutdown_waiters, 1);
+    pthread_cond_broadcast(&pool->life_cv); /* wake destroy waiter */
+    pthread_mutex_unlock(&pool->life_mu);
+    return aborts;
+}
+
+static void note_abort(awp_pool_t *pool, int *aborts)
+{
+    (*aborts)++;
+    atomic_fetch_add(&pool->shutdown_aborts, 1);
 }
 
 int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
 {
     awp_pool_t *pool;
     uint32_t i;
+    uint32_t rings_ok = 0;
     int rc;
 
     if (!cfg || !out || !cfg->process)
@@ -105,7 +121,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
     if (cfg->n_workers < 1 || cfg->queue_capacity < 1 || cfg->frame_pool_size < 1)
         return -EINVAL;
     if (cfg->n_broadcast_workers >= cfg->n_workers)
-        return -EINVAL; /* need ≥1 sharded worker for symbol traffic */
+        return -EINVAL;
     if ((unsigned)cfg->ring_mode > (unsigned)AWP_RING_MPMC)
         return -EINVAL;
     if (awp_round_up_pow2(cfg->queue_capacity) == 0)
@@ -127,10 +143,12 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
     atomic_store(&pool->abandoned, 0);
     atomic_store(&pool->lifecycle, AWP_LIFE_INIT);
     atomic_store(&pool->active_submits, 0);
+    atomic_store(&pool->api_refs, 0);
     atomic_store(&pool->shutdown_waiters, 0);
     atomic_store(&pool->supervisor_stop, 0);
     atomic_store(&pool->supervisor_alive, 0);
-    atomic_store(&pool->supervisor_joined, 1); /* no supervisor yet */
+    atomic_store(&pool->supervisor_joined, 1);
+    atomic_store(&pool->supervisor_started, 0);
     atomic_store(&pool->quarantined, 0);
 
     if (pthread_mutex_init(&pool->life_mu, NULL) != 0) {
@@ -182,6 +200,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
         rc = awp_ring_init(&w->queue, cfg->queue_capacity, cfg->ring_mode);
         if (rc != 0)
             goto fail_workers;
+        rings_ok++;
     }
 
     set_life(pool, AWP_LIFE_RUNNING);
@@ -200,6 +219,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
             rc = -rc;
             goto fail_running;
         }
+        atomic_store(&pool->supervisor_started, 1);
     }
 
     *out = pool;
@@ -211,17 +231,14 @@ fail_running:
     for (i = 0; i < cfg->n_workers; i++) {
         atomic_store(&pool->workers[i].stop, 1);
         awp_ring_close(&pool->workers[i].queue);
-        if (atomic_load(&pool->workers[i].state) == AWP_W_RUNNING ||
-            atomic_load(&pool->workers[i].state) == AWP_W_STARTING ||
-            atomic_load(&pool->workers[i].state) == AWP_W_EXITED) {
-            if (!atomic_load(&pool->workers[i].joined)) {
-                pthread_join(pool->workers[i].thread, NULL);
+        if (!atomic_load(&pool->workers[i].joined)) {
+            if (pthread_join(pool->workers[i].thread, NULL) == 0)
                 atomic_store(&pool->workers[i].joined, 1);
-            }
         }
     }
 fail_workers:
-    for (i = 0; i < cfg->n_workers; i++)
+    /* Destroy only successfully initialized rings. */
+    for (i = 0; i < rings_ok; i++)
         awp_ring_destroy(&pool->workers[i].queue);
     free(pool->workers);
     free(pool->metrics_buf);
@@ -247,6 +264,7 @@ int awp_submit(awp_pool_t *pool,
     awp_frame_t *f;
     uint32_t shard;
     uint64_t blocked_acc = 0;
+    uint64_t submit_ns;
     int rc;
     size_t flen, slen;
     unsigned spin = 0;
@@ -256,26 +274,32 @@ int awp_submit(awp_pool_t *pool,
     if (awp_tls_in_callback)
         return -EDEADLK;
 
+    /* Enter before any further pool field access after the raw pointer. */
+    awp_api_enter(pool);
+
     if (!feed)
         feed = "";
     if (!symbol)
         symbol = "";
     flen = strlen(feed);
     slen = strlen(symbol);
-    if (flen > AWP_FEED_MAX || slen > AWP_SYMBOL_MAX)
+    if (flen > AWP_FEED_MAX || slen > AWP_SYMBOL_MAX) {
+        awp_api_leave(pool);
         return -E2BIG;
-    if (payload_len > AWP_PAYLOAD_MAX)
+    }
+    if (payload_len > AWP_PAYLOAD_MAX) {
+        awp_api_leave(pool);
         return -E2BIG;
-    if (payload_len > 0 && !payload)
+    }
+    if (payload_len > 0 && !payload) {
+        awp_api_leave(pool);
         return -EINVAL;
+    }
 
-    /*
-     * Register before lifecycle re-check so QUIESCING always sees us in
-     * active_submits (closes the check-then-increment race).
-     */
     atomic_fetch_add(&pool->active_submits, 1);
     if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
         atomic_fetch_sub(&pool->active_submits, 1);
+        awp_api_leave(pool);
         return -EINVAL;
     }
 
@@ -283,19 +307,19 @@ int awp_submit(awp_pool_t *pool,
     if (shard >= pool->cfg.n_workers)
         shard = shard % pool->cfg.n_workers;
 
-    /*
-     * Hot-shard isolation: never hold a frame while blocked on a full ring.
-     * Acquire → try_push; on full, release frame, park for space, retry.
-     */
+    submit_ns = awp_now_ns(); /* retain across retries for honest latency */
+
     for (;;) {
         if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
             atomic_fetch_sub(&pool->active_submits, 1);
+            awp_api_leave(pool);
             return -EINVAL;
         }
 
         f = awp_frame_pool_acquire(&pool->frames);
         if (!f) {
             atomic_fetch_sub(&pool->active_submits, 1);
+            awp_api_leave(pool);
             return -1;
         }
 
@@ -308,24 +332,23 @@ int awp_submit(awp_pool_t *pool,
         f->payload_len = payload_len;
         f->flags = flags;
         f->seq = atomic_fetch_add(&pool->seq, 1);
-        f->submit_ns = awp_now_ns();
+        f->submit_ns = submit_ns;
         f->shard = shard;
 
         rc = awp_ring_try_push(&pool->workers[shard].queue, f);
         if (rc == 0)
             break;
 
-        /* Push failed — release frame before waiting (no global hold on full ring). */
         awp_frame_pool_release(&pool->frames, f);
 
         if (rc == -1 || atomic_load(&pool->workers[shard].queue.closed) ||
             atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
             atomic_fetch_add(&pool->dropped, 1);
             atomic_fetch_sub(&pool->active_submits, 1);
+            awp_api_leave(pool);
             return -1;
         }
 
-        /* Full or CAS race: park / spin then retry. */
         if (spin++ < 64)
             awp_cpu_relax();
         else {
@@ -349,6 +372,7 @@ int awp_submit(awp_pool_t *pool,
     }
     atomic_fetch_add(&pool->submitted, 1);
     atomic_fetch_sub(&pool->active_submits, 1);
+    awp_api_leave(pool);
     return 0;
 }
 
@@ -358,6 +382,7 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out)
     if (!pool || !out)
         return -EINVAL;
 
+    awp_api_enter(pool);
     pthread_mutex_lock(&pool->metrics_mu);
     out->submitted = atomic_load_explicit(&pool->submitted, memory_order_relaxed);
     out->dropped = atomic_load_explicit(&pool->dropped, memory_order_relaxed) +
@@ -386,14 +411,20 @@ int awp_pool_get_metrics(awp_pool_t *pool, awp_pool_metrics_t *out)
         m->alive = (st == AWP_W_RUNNING || st == AWP_W_STARTING) ? 1 : 0;
     }
     pthread_mutex_unlock(&pool->metrics_mu);
+    awp_api_leave(pool);
     return 0;
 }
 
 uint64_t awp_pool_drops(const awp_pool_t *pool)
 {
+    uint64_t d;
     if (!pool)
         return 0;
-    return atomic_load(&pool->dropped) + atomic_load(&pool->abandoned);
+    /* const cast for refcount — drops is read-only on counters */
+    awp_api_enter((awp_pool_t *)pool);
+    d = atomic_load(&pool->dropped) + atomic_load(&pool->abandoned);
+    awp_api_leave((awp_pool_t *)pool);
+    return d;
 }
 
 int awp_pool_shutdown(awp_pool_t *pool)
@@ -404,6 +435,7 @@ int awp_pool_shutdown(awp_pool_t *pool)
     int aborts = 0;
     int life;
     int rc;
+    int can_close = 1;
 
     if (!pool)
         return -EINVAL;
@@ -413,17 +445,14 @@ int awp_pool_shutdown(awp_pool_t *pool)
     life = atomic_load(&pool->lifecycle);
     if (life == AWP_LIFE_STOPPED)
         return (int)atomic_load(&pool->shutdown_aborts);
-    if (life == AWP_LIFE_QUIESCING || life == AWP_LIFE_DRAINING) {
-        wait_until_stopped(pool);
-        return (int)atomic_load(&pool->shutdown_aborts);
-    }
+    if (life == AWP_LIFE_QUIESCING || life == AWP_LIFE_DRAINING)
+        return wait_until_stopped(pool);
 
-    /* RUNNING -> QUIESCING */
     if (!atomic_compare_exchange_strong(&pool->lifecycle, &life,
                                         AWP_LIFE_QUIESCING)) {
-        return awp_pool_shutdown(pool); /* race: re-enter */
+        return awp_pool_shutdown(pool);
     }
-    /* Wake life waiters that may care about QUIESCING (none today). */
+    /* Wake any observers of QUIESCING under life_mu. */
     pthread_mutex_lock(&pool->life_mu);
     pthread_cond_broadcast(&pool->life_cv);
     pthread_mutex_unlock(&pool->life_mu);
@@ -434,64 +463,82 @@ int awp_pool_shutdown(awp_pool_t *pool)
     t0 = awp_now_ns();
     deadline_ns = t0 + (uint64_t)deadline_ms * 1000000ull;
 
-    /* Wait for in-flight submits. */
     while (atomic_load(&pool->active_submits) > 0 && awp_now_ns() < deadline_ns) {
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 1 * 1000 * 1000 };
         nanosleep(&ts, NULL);
     }
     if (atomic_load(&pool->active_submits) > 0) {
-        /* Cannot prove submitters have left rings — sticky leak. */
+        /*
+         * Do NOT close rings while counted submitters may still publish.
+         * Sticky quarantine; skip drain close path.
+         */
         awp_pool_mark_quarantined(pool);
+        note_abort(pool, &aborts);
+        can_close = 0;
         fprintf(stderr,
-                "[awp] shutdown: active_submits still > 0 after deadline; "
-                "pool quarantined\n");
+                "[awp] shutdown: active_submits > 0 after deadline; "
+                "quarantine, rings left open\n");
     }
 
-    /* Stop supervisor before closing rings (no restarts during drain). */
     atomic_store(&pool->supervisor_stop, 1);
     set_life(pool, AWP_LIFE_DRAINING);
 
-    if (pool->cfg.enable_supervisor && !atomic_load(&pool->supervisor_joined)) {
+    if (pool->cfg.enable_supervisor && atomic_load(&pool->supervisor_started) &&
+        !atomic_load(&pool->supervisor_joined)) {
         while (atomic_load(&pool->supervisor_alive) && awp_now_ns() < deadline_ns) {
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 2 * 1000 * 1000 };
             nanosleep(&ts, NULL);
         }
         if (!atomic_load(&pool->supervisor_alive)) {
-            if (!atomic_exchange(&pool->supervisor_joined, 1))
-                pthread_join(pool->supervisor, NULL);
+            if (pthread_join(pool->supervisor, NULL) == 0)
+                atomic_store(&pool->supervisor_joined, 1);
+            else {
+                awp_pool_mark_quarantined(pool);
+                note_abort(pool, &aborts);
+            }
         } else {
-            /* Supervisor still running past deadline — must not free pool. */
             awp_pool_mark_quarantined(pool);
+            note_abort(pool, &aborts);
             fprintf(stderr,
                     "[awp] shutdown: supervisor not joined; pool quarantined\n");
         }
     }
 
-    /* Close rings: workers drain then exit on closed+empty. */
-    for (i = 0; i < pool->cfg.n_workers; i++)
-        awp_ring_close(&pool->workers[i].queue);
-    awp_frame_pool_close(&pool->frames);
+    if (can_close) {
+        for (i = 0; i < pool->cfg.n_workers; i++)
+            awp_ring_close(&pool->workers[i].queue);
+        awp_frame_pool_close(&pool->frames);
 
-    for (i = 0; i < pool->cfg.n_workers; i++) {
-        int aborted = 0;
-        rc = awp_worker_join_deadline(&pool->workers[i], deadline_ns, &aborted);
-        if (aborted || rc > 0) {
-            aborts++;
-            atomic_fetch_add(&pool->shutdown_aborts, 1);
-        }
-        /* Drain leftovers only if not quarantined (thread may still own frames). */
-        if (atomic_load(&pool->workers[i].state) != AWP_W_QUARANTINED) {
-            awp_frame_t *f;
-            while (awp_ring_pop(&pool->workers[i].queue, &f) == 0 && f) {
-                atomic_fetch_add(&pool->abandoned, 1);
-                awp_frame_pool_release(&pool->frames, f);
+        for (i = 0; i < pool->cfg.n_workers; i++) {
+            int aborted = 0;
+            rc = awp_worker_join_deadline(&pool->workers[i], deadline_ns, &aborted);
+            if (aborted || rc > 0)
+                note_abort(pool, &aborts);
+            if (rc < 0)
+                note_abort(pool, &aborts);
+            if (atomic_load(&pool->workers[i].state) != AWP_W_QUARANTINED) {
+                awp_frame_t *f;
+                while (awp_ring_pop(&pool->workers[i].queue, &f) == 0 && f) {
+                    atomic_fetch_add(&pool->abandoned, 1);
+                    awp_frame_pool_release(&pool->frames, f);
+                }
             }
         }
+    } else {
+        /* Cannot safely join while rings may still receive publishes. */
+        for (i = 0; i < pool->cfg.n_workers; i++) {
+            if (atomic_load(&pool->workers[i].state) == AWP_W_RUNNING ||
+                atomic_load(&pool->workers[i].state) == AWP_W_STARTING) {
+                atomic_store(&pool->workers[i].state, AWP_W_QUARANTINED);
+            }
+        }
+        awp_pool_mark_quarantined(pool);
     }
 
     if (any_worker_quarantined(pool) || atomic_load(&pool->active_submits) > 0)
         awp_pool_mark_quarantined(pool);
 
+    /* Publish STOPPED only after all shutdown-side pool accesses are done. */
     set_life(pool, AWP_LIFE_STOPPED);
     return aborts;
 }
@@ -502,7 +549,6 @@ void awp_pool_destroy(awp_pool_t *pool)
     if (!pool)
         return;
 
-    /* Cannot reclaim while inside process()/on_error() on this thread. */
     if (awp_tls_in_callback) {
         awp_pool_mark_quarantined(pool);
         fprintf(stderr,
@@ -513,13 +559,19 @@ void awp_pool_destroy(awp_pool_t *pool)
     if (atomic_load(&pool->lifecycle) != AWP_LIFE_STOPPED)
         (void)awp_pool_shutdown(pool);
 
-    /* Wait for concurrent shutdown waiters to leave life_cv before free. */
+    /* Wait for concurrent shutdown waiters under life_mu (no free under them). */
+    pthread_mutex_lock(&pool->life_mu);
+    while (atomic_load(&pool->shutdown_waiters) > 0)
+        pthread_cond_wait(&pool->life_cv, &pool->life_mu);
+    pthread_mutex_unlock(&pool->life_mu);
+
+    /* Wait for public API refs to drain. */
     {
         unsigned spins = 0;
-        while (atomic_load(&pool->shutdown_waiters) > 0) {
+        while (atomic_load(&pool->api_refs) > 0) {
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 1 * 1000 * 1000 };
             nanosleep(&ts, NULL);
-            if (++spins > 30000) { /* ~30s safety */
+            if (++spins > 5000) { /* 5s */
                 awp_pool_mark_quarantined(pool);
                 break;
             }
@@ -528,11 +580,23 @@ void awp_pool_destroy(awp_pool_t *pool)
 
     if (atomic_load(&pool->quarantined) || any_worker_quarantined(pool) ||
         atomic_load(&pool->active_submits) > 0 ||
-        (pool->cfg.enable_supervisor && !atomic_load(&pool->supervisor_joined))) {
+        atomic_load(&pool->api_refs) > 0 ||
+        (atomic_load(&pool->supervisor_started) &&
+         !atomic_load(&pool->supervisor_joined))) {
         fprintf(stderr,
                 "[awp] destroy: live references possible; leaking pool memory "
                 "to avoid UAF\n");
         return;
+    }
+
+    for (i = 0; i < pool->cfg.n_workers; i++) {
+        if (!atomic_load(&pool->workers[i].joined) &&
+            atomic_load(&pool->workers[i].state) != AWP_W_QUARANTINED) {
+            /* Should not happen if reclaimable; be safe. */
+            awp_pool_mark_quarantined(pool);
+            fprintf(stderr, "[awp] destroy: worker %u not joined; leak\n", i);
+            return;
+        }
     }
 
     for (i = 0; i < pool->cfg.n_workers; i++)

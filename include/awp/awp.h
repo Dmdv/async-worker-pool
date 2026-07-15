@@ -192,8 +192,15 @@ int awp_pool_shutdown(awp_pool_t *pool);
 
 /**
  * Destroy after shutdown (or call shutdown then destroy).
- * If any worker/supervisor/submitter may still reference pool memory,
- * storage is leaked intentionally to avoid UAF.
+ *
+ * Reclaim is only safe when: lifecycle is STOPPED, no shutdown waiters,
+ * no live public API refs (submit/metrics/...), all workers joined, and
+ * the supervisor (if started) is joined. Otherwise storage is leaked
+ * intentionally (sticky quarantine).
+ *
+ * Contract: do not call destroy concurrently with threads still about to
+ * enter pool APIs for the first time without going through awp_* entry
+ * (external join of submitter threads is required for that edge case).
  * Not safe to call from process()/on_error() (marks quarantine, no free).
  */
 void awp_pool_destroy(awp_pool_t *pool);

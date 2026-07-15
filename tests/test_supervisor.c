@@ -58,8 +58,8 @@ static void test_quarantine_true_sticky_destroy_safe(void)
     TEST_CHECK(elapsed_ms < 3000, "shutdown bounded with sticky callback");
     TEST_CHECK(rc >= 0, "shutdown non-negative");
     TEST_CHECK(atomic_load(&pool->quarantined) == 1, "pool sticky-quarantined");
-    TEST_CHECK(rc > 0 || atomic_load(&pool->shutdown_aborts) > 0,
-               "abort/quarantine counted");
+    TEST_CHECK(rc > 0, "shutdown returns >0 when quarantined/late");
+    TEST_CHECK(atomic_load(&pool->shutdown_aborts) > 0, "abort counter incremented");
 
     /* Must not free (would UAF sticky thread). No crash is the pass. */
     awp_pool_destroy(pool);

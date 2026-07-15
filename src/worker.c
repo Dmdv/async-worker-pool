@@ -80,6 +80,24 @@ int awp_worker_start(awp_worker_t *w)
     return 0;
 }
 
+static int join_exited(awp_worker_t *w)
+{
+    int rc;
+    if (atomic_load(&w->joined))
+        return 0;
+    rc = pthread_join(w->thread, NULL);
+    if (rc != 0) {
+        awp_pool_mark_quarantined(w->pool);
+        fprintf(stderr,
+                "[awp] worker %u pthread_join failed (%d); quarantined\n",
+                w->id, rc);
+        return -rc;
+    }
+    atomic_store(&w->joined, 1);
+    atomic_store(&w->state, AWP_W_JOINED);
+    return 0;
+}
+
 int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted)
 {
     int st;
@@ -99,7 +117,7 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
         return 1;
     }
 
-    /* Wait for EXITED or deadline. */
+    /* Wait for EXITED or absolute deadline. */
     while (atomic_load(&w->state) == AWP_W_STARTING ||
            atomic_load(&w->state) == AWP_W_RUNNING) {
         if (awp_now_ns() >= deadline_ns)
@@ -112,33 +130,38 @@ int awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted
 
     st = atomic_load(&w->state);
     if (st == AWP_W_EXITED || st == AWP_W_JOINED) {
-        if (!atomic_exchange(&w->joined, 1)) {
-            int rc = pthread_join(w->thread, NULL);
-            atomic_store(&w->state, AWP_W_JOINED);
-            return rc == 0 ? 0 : -rc;
+        int rc = join_exited(w);
+        if (rc != 0) {
+            if (aborted)
+                *aborted = 1;
+            return 1;
         }
         return 0;
     }
 
-    /* Still running past deadline: mark quarantine — never cancel/detach/free. */
+    /* Still running past deadline: cooperative stop + close; grace within remaining budget. */
     atomic_store(&w->stop, 1);
     awp_ring_close(&w->queue);
     {
-        uint64_t grace = awp_now_ns() + 200000000ull;
+        uint64_t grace_end = deadline_ns;
+        uint64_t now = awp_now_ns();
+        /* Small grace only if budget remains; never extend past absolute deadline. */
+        if (grace_end < now + 50000000ull && grace_end > now)
+            ; /* use remaining only */
+        else if (grace_end > now + 200000000ull)
+            grace_end = now + 200000000ull; /* cap 200ms when budget allows */
         while ((atomic_load(&w->state) == AWP_W_RUNNING ||
                 atomic_load(&w->state) == AWP_W_STARTING) &&
-               awp_now_ns() < grace) {
+               awp_now_ns() < grace_end && awp_now_ns() < deadline_ns) {
             struct timespec ts = { .tv_sec = 0, .tv_nsec = 2 * 1000 * 1000 };
             nanosleep(&ts, NULL);
         }
     }
     if (atomic_load(&w->state) == AWP_W_EXITED) {
-        if (!atomic_exchange(&w->joined, 1))
-            pthread_join(w->thread, NULL);
-        atomic_store(&w->state, AWP_W_JOINED);
+        int rc = join_exited(w);
         if (aborted)
             *aborted = 1;
-        return 1;
+        return rc != 0 ? 1 : 1;
     }
 
     atomic_store(&w->state, AWP_W_QUARANTINED);

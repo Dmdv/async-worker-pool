@@ -71,5 +71,11 @@ uint32_t awp_shard_of(const awp_pool_t *pool,
                       const char *symbol,
                       uint32_t flags)
 {
-    return awp_compute_shard(pool, feed, symbol, flags);
+    uint32_t s;
+    if (!pool)
+        return 0;
+    awp_api_enter((awp_pool_t *)pool);
+    s = awp_compute_shard(pool, feed, symbol, flags);
+    awp_api_leave((awp_pool_t *)pool);
+    return s;
 }

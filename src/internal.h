@@ -175,10 +175,12 @@ struct awp_pool {
 
     atomic_int lifecycle; /* awp_lifecycle_t */
     atomic_int active_submits;
+    atomic_int api_refs; /* live public API calls (submit/metrics/...) */
     atomic_int shutdown_waiters; /* concurrent shutdown callers waiting STOPPED */
     atomic_int supervisor_stop;
     atomic_int supervisor_alive;
     atomic_int supervisor_joined; /* 1 if no supervisor or join completed */
+    atomic_int supervisor_started; /* 1 after pthread_create of supervisor succeeds */
     atomic_int quarantined; /* 1 ⇒ destroy must leak (live refs possible) */
 
     pthread_t supervisor;
@@ -208,6 +210,19 @@ static inline void awp_pool_mark_quarantined(awp_pool_t *pool)
 {
     if (pool)
         atomic_store(&pool->quarantined, 1);
+}
+
+/** Count a public API entry (must pair with leave). */
+static inline void awp_api_enter(awp_pool_t *pool)
+{
+    if (pool)
+        atomic_fetch_add_explicit(&pool->api_refs, 1, memory_order_acq_rel);
+}
+
+static inline void awp_api_leave(awp_pool_t *pool)
+{
+    if (pool)
+        atomic_fetch_sub_explicit(&pool->api_refs, 1, memory_order_acq_rel);
 }
 
 uint32_t awp_compute_shard(const awp_pool_t *pool,

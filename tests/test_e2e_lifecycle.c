@@ -256,6 +256,46 @@ static void test_try_push_hot_shard_no_hold(void)
     test_ctx_destroy(&ctx);
 }
 
+static void test_destroy_after_concurrent_shutdown_waiters(void)
+{
+    awp_config_t cfg;
+    awp_pool_t *pool = NULL;
+    test_ctx_t ctx;
+    pthread_t th[8];
+    shut_arg_t sa[8];
+    atomic_int ok;
+    int i;
+
+    printf("e2e_lifecycle destroy after many concurrent shutdown waiters\n");
+    test_ctx_init(&ctx);
+    atomic_init(&ok, 0);
+    awp_config_init(&cfg);
+    cfg.n_workers = 4;
+    cfg.queue_capacity = 32;
+    cfg.frame_pool_size = 128;
+    cfg.enable_supervisor = 0;
+    cfg.process = test_process;
+    cfg.user = &ctx;
+
+    TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
+    for (i = 0; i < 40; i++)
+        awp_submit(pool, "t", "s", "x", 1, 0);
+
+    for (i = 0; i < 8; i++) {
+        sa[i].pool = pool;
+        sa[i].rc_sum = &ok;
+        pthread_create(&th[i], NULL, shut_thr, &sa[i]);
+    }
+    for (i = 0; i < 8; i++)
+        pthread_join(th[i], NULL);
+
+    TEST_EQ_I(atomic_load(&ok), 8, "all waiters completed");
+    /* Must free cleanly when reclaimable (no quarantine). */
+    TEST_CHECK(atomic_load(&pool->quarantined) == 0, "not quarantined");
+    awp_pool_destroy(pool);
+    test_ctx_destroy(&ctx);
+}
+
 int main(void)
 {
     test_shutdown_drains_accepted();
@@ -263,6 +303,7 @@ int main(void)
     test_restart_preserves_progress();
     test_restart_with_queued_work();
     test_try_push_hot_shard_no_hold();
+    test_destroy_after_concurrent_shutdown_waiters();
     printf("\ne2e_lifecycle: %d passed, %d failed\n", g_passes, g_fails);
     return g_fails ? 1 : 0;
 }
