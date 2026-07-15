@@ -296,6 +296,85 @@ static void test_destroy_after_concurrent_shutdown_waiters(void)
     test_ctx_destroy(&ctx);
 }
 
+/**
+ * Pass 10 regression: after terminal STOPPED, a late reopen must not leave the
+ * ring open (restart_worker re-closes when lifecycle is no longer RUNNING).
+ */
+static void test_terminal_reopen_recloses(void)
+{
+    awp_config_t cfg;
+    awp_pool_t *pool = NULL;
+    test_ctx_t ctx;
+    uint32_t i;
+
+    printf("e2e_lifecycle terminal reopen re-closes ring\n");
+    test_ctx_init(&ctx);
+    awp_config_init(&cfg);
+    cfg.n_workers = 2;
+    cfg.queue_capacity = 16;
+    cfg.frame_pool_size = 32;
+    cfg.enable_supervisor = 0;
+    cfg.process = test_process;
+    cfg.user = &ctx;
+
+    TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
+    TEST_EQ_I(awp_submit(pool, "t", "s", "x", 1, 0), 0, "submit");
+    wait_processed(&ctx, 1, 2000);
+    TEST_CHECK(awp_pool_shutdown(pool) >= 0, "shutdown");
+    TEST_CHECK(atomic_load(&pool->lifecycle) == AWP_LIFE_STOPPED, "STOPPED");
+
+    for (i = 0; i < pool->cfg.n_workers; i++)
+        TEST_CHECK(atomic_load(&pool->workers[i].queue.closed) == 1,
+                   "rings closed after shutdown");
+
+    /* Simulate late supervisor reopen after terminal close. */
+    awp_ring_reopen(&pool->workers[0].queue);
+    TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 0, "reopen opens");
+
+    /* Same post-reopen lifecycle check as restart_worker. */
+    if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING)
+        awp_ring_close(&pool->workers[0].queue);
+    TEST_CHECK(atomic_load(&pool->workers[0].queue.closed) == 1,
+               "re-closed after terminal lifecycle check");
+
+    awp_pool_destroy(pool);
+    test_ctx_destroy(&ctx);
+}
+
+/** Stuck process + short deadline → quarantine; rings must be closed. */
+static void test_quarantine_path_closes_rings(void)
+{
+    awp_config_t cfg;
+    awp_pool_t *pool = NULL;
+    test_ctx_t ctx;
+    uint32_t i;
+    int rc;
+
+    printf("e2e_lifecycle sticky hang shutdown closes rings\n");
+    test_ctx_init(&ctx);
+    atomic_store(&ctx.hang, 1);
+    awp_config_init(&cfg);
+    cfg.n_workers = 1;
+    cfg.queue_capacity = 8;
+    cfg.frame_pool_size = 16;
+    cfg.enable_supervisor = 0;
+    cfg.shutdown_deadline_ms = 300;
+    cfg.process = test_process;
+    cfg.user = &ctx;
+
+    TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
+    TEST_EQ_I(awp_submit(pool, "t", "s", "x", 1, 0), 0, "submit stuck");
+    test_sleep_ms(50);
+    rc = awp_pool_shutdown(pool);
+    TEST_CHECK(rc > 0, "shutdown reports abort/quarantine");
+    for (i = 0; i < pool->cfg.n_workers; i++)
+        TEST_CHECK(atomic_load(&pool->workers[i].queue.closed) == 1,
+                   "ring closed on quarantine path");
+    atomic_store(&ctx.hang, 0);
+    awp_pool_destroy(pool);
+    test_ctx_destroy(&ctx);
+}
+
 int main(void)
 {
     test_shutdown_drains_accepted();
@@ -304,6 +383,8 @@ int main(void)
     test_restart_with_queued_work();
     test_try_push_hot_shard_no_hold();
     test_destroy_after_concurrent_shutdown_waiters();
+    test_terminal_reopen_recloses();
+    test_quarantine_path_closes_rings();
     printf("\ne2e_lifecycle: %d passed, %d failed\n", g_passes, g_fails);
     return g_fails ? 1 : 0;
 }

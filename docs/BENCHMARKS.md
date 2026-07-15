@@ -44,7 +44,8 @@ MPMC   prods=4 cons=4 ops=500000 thr=8764088 msg/s errs=0 consumed=500000 PASS
 
 ## Notes
 
-- Latency is ingest→process wall time (ns → ms).
-- PASS criteria: pool p99 ≤ 5 ms, drops == 0.
+- Latency is **submit timestamp → process-entry** (and, after Pass 12, optionally through simulated light work in-callback). It is **not** end-to-end publisher-buffer accept.
+- Workload is a **closed-loop burst**, not open-loop 1–5k msg/s with sparse wakeups.
+- PASS criteria: pool p99 ≤ 5 ms on that microbench interval, drops == 0.
 - Ring thr is pure queue push/pop (no process callback).
 - Numbers are single-run local; compare relative mode cost, not absolute cloud SLAs.

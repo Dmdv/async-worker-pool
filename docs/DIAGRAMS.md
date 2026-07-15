@@ -141,16 +141,22 @@ flowchart TD
   HB -->|yes| MET[Update metrics]
   HB -->|thread exited| RESTART[Join thread]
   HB -->|stall: depth>0 no progress| STOP[Cooperative stop request]
-  STOP --> JOIN{Join within budget?}
-  JOIN -->|yes| REOPEN
-  JOIN -->|no| QUAR[Quarantine: cancel/detach — leak rings]
-  RESTART --> REOPEN[awp_ring_reopen — keep storage + backlog]
-  REOPEN --> SPAWN[pthread_create worker again]
-  SPAWN --> MET
+  STOP --> PROG{Progress resumed?}
+  PROG -->|yes| MET
+  PROG -->|no| QUAR[Quarantine: close shard + frame pool — leak on destroy]
+  RESTART --> LIFE{lifecycle still RUNNING?}
+  LIFE -->|no| CLOSE[Keep/re-close ring]
+  LIFE -->|yes| REOPEN[awp_ring_reopen — keep storage + backlog]
+  REOPEN --> LIFE2{still RUNNING?}
+  LIFE2 -->|no| CLOSE
+  LIFE2 -->|yes| SPAWN[pthread_create worker]
+  SPAWN -->|ok| MET
+  SPAWN -->|fail| QUAR
+  CLOSE --> MET
   QUAR --> MET
 ```
 
-Restart **reopens** the ring in place (preserves backlog). Destroy of a live backlog is not used on the restart path.
+Restart **reopens** the ring only while `RUNNING`; if shutdown wins mid-restart, the ring is **re-closed** so producers wake. Stuck callbacks are never cancelled/detached.
 
 ## Related docs
 

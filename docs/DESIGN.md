@@ -7,7 +7,7 @@ Preallocated, sharded dispatch stage for market-data frames:
 - **N** long-lived `pthread` workers (created once)
 - Producer-side shard: `hash(feed, symbol) % N` → per-key **FIFO**
 - Bounded per-worker queues with **blocking backpressure** (never drop)
-- p99 ingest→process ≤ **5 ms** at ~1–5k msg/s, ~500–2000 keys
+- p99 **submit→process-entry** ≤ **5 ms** on a closed-loop microbench (not open-loop publisher-accept)
 - Fault isolation, supervisor heartbeats, bounded shutdown
 
 This is the C analog of the Rust/tokio permanent-worker “Design A” pool.
@@ -81,23 +81,23 @@ Stable hash ⇒ same key ⇒ same worker ⇒ sequential process ⇒ **reorder di
 
 | Fault | Behavior |
 |-------|----------|
-| Soft `process()` error | Log/metric, recycle frame, **continue loop** |
-| Unexpected worker exit | Supervisor joins + restarts thread |
-| Stall (queue depth > 0, no progress) | Cooperative stop → optional cancel → restart |
-| Shutdown deadline | Per-worker join timeout → cancel/detach → return abort count |
+| Soft `process()` error | Count + optional `on_error`, recycle frame, **continue loop** |
+| Unexpected worker exit | Supervisor joins + restarts thread (`awp_ring_reopen`, backlog kept) |
+| Stall (queue depth > 0, no progress) | Cooperative stop; if still no progress → **quarantine**, close shard + frame pool, leak on destroy |
+| Shutdown deadline | Quiesce submits; join within absolute deadline; late/stuck workers **quarantined** (no `pthread_cancel` / detach) |
 
-C has no `catch_unwind`. Soft errors **must** be error codes. Hard faults (SIGSEGV in third-party code) remain process-fatal; supervisor + metrics make silent dark buckets diagnosable when the thread simply exits or stalls.
+C has no `catch_unwind`. Soft errors **must** be error codes. Hard faults (SIGSEGV in third-party code) remain process-fatal; supervisor + metrics make silent dark buckets diagnosable when the thread simply exits or stalls. **Cancellation is disabled** inside workers.
 
 ## Bounded shutdown
 
-1. Set `shutting_down`
-2. Close frame pool + all rings (wake waiters)
-3. Join supervisor
-4. Join each worker with a share of `shutdown_deadline_ms`
-5. Force-stop leftovers (`pthread_cancel` then detach if needed)
-6. Drain residual frames back to the pool
+1. `RUNNING → QUIESCING` (reject new admits; wait `active_submits`)
+2. Stop supervisor; `DRAINING`
+3. Close frame pool + **all rings** (wake every parked producer/consumer wait)
+4. If supervisor joined and submits drained: join workers under absolute deadline; residual drain
+5. Else (timeout / unjoined supervisor): **quarantine** — rings closed, no join of stuck callbacks; destroy will leak
+6. `STOPPED`; destroy only if reclaimable (joined, no quarantine, no live API refs)
 
-Portable: no Linux-only `pthread_timedjoin_np` — poll `alive` + sleep.
+Portable: no Linux-only `pthread_timedjoin_np` — poll state + sleep. **No force-stop via cancel/detach.**
 
 ## Observability
 
@@ -105,9 +105,9 @@ Per-worker: `processed`, `process_errors`, `enqueue_blocks`, `blocked_ns`, `queu
 
 Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 
-## Runtime gate
+## Runtime helper
 
-`AWP_ENABLED=1|true|yes` via `awp_runtime_enabled()` — mirror of Rust `DISPATCH_WORKER_POOL_ENABLED` for incremental rollout.
+`awp_runtime_enabled()` reads `AWP_ENABLED=1|true|yes`. **Create is not gated** — callers decide whether to construct a pool.
 
 ## Explicit non-goals
 
@@ -126,7 +126,8 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | Bounded shutdown | `test_bounded_shutdown_stuck_worker` |
 | Supervisor restart | `test_supervisor_restart_dead_worker` |
 | Multi-reader e2e, reorder=0 | `test_e2e` |
-| p99 ≤ 5 ms, drops=0 | `bench_dispatch` |
+| p99 submit→process-entry ≤ 5 ms, drops=0 | `bench_dispatch` (microbench) |
+| Terminal reopen re-closes | `test_terminal_reopen_recloses` |
 
 ## Codex reviews (gpt-5.6-sol xhigh)
 
@@ -213,9 +214,9 @@ At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor
 Restart-failure quarantine closed the shard but not the global frame freelist wait. Follow-up: `awp_pool_mark_quarantined` closes/wakes the frame pool; submit rechecks quarantine after acquire.
 
 
-### Pass 11 was **ACCEPT_WITH_NITS**
+### Pass 11 was **ACCEPT_WITH_NITS** → Pass 12 nits cleanup
 
-Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Residual: DESIGN/diagram wording (cancel/detach), bench methodology honesty, deeper adversarial tests.
+Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Pass 12 addresses residual docs/bench honesty + reopen regression test.
 
 ## Build & verify
 

@@ -2,7 +2,7 @@
 
 **Sharded low-latency dispatch worker pool in C** — preallocated `pthread` workers, bounded per-worker queues, stable hash sharding for per-`(feed, symbol)` FIFO, blocking backpressure (zero drops), fault-isolated process callbacks, supervisor heartbeats, and bounded shutdown.
 
-Designed as the C equivalent of a permanent-worker market-data dispatch stage (target: p99 ingest→publish-accept ≤ 5 ms at ~1–5k msg/s).
+Designed as the C equivalent of a permanent-worker market-data dispatch stage. Local microbench target: **p99 submit→process-entry ≤ 5 ms** (closed-loop burst; not open-loop publisher-accept SLA).
 
 ## Features
 
@@ -14,7 +14,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage (t
 - **Soft fault isolation**: `process()` errors recycle the frame and continue
 - **Supervisor**: restarts dead/stalled workers; per-worker metrics
 - **Bounded shutdown** with hard deadline (portable, no Linux-only APIs)
-- **Runtime gate**: `AWP_ENABLED=1`
+- **Runtime helper**: `awp_runtime_enabled()` / `AWP_ENABLED` (caller-owned; create is not gated)
 
 ## Quick start
 
@@ -74,9 +74,9 @@ docs/diagrams/        Rendered PNG diagrams
 | N workers | Config knob for **hash skew** headroom (e.g. 32), not `#cores` |
 | Ordering | Stable hash ⇒ one worker per key ⇒ FIFO by construction |
 | Backpressure | Block producer when full; `drops` must stay 0 |
-| Shutdown | Signal → drain with deadline → force-stop stuck workers |
+| Shutdown | Quiesce → close rings/pool (wake waiters) → join under deadline → **quarantine** stuck callbacks (no cancel/detach) |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · Codex Pass 3: [`docs/CODEX_IMPLEMENTATION_REVIEW.md`](docs/CODEX_IMPLEMENTATION_REVIEW.md) · Codex loop Pass 11: [`docs/CODEX_PASS11_REVIEW.md`](docs/CODEX_PASS11_REVIEW.md) (**ACCEPT_WITH_NITS**).
+Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · Codex Pass 11/12: [`docs/CODEX_PASS11_REVIEW.md`](docs/CODEX_PASS11_REVIEW.md).
 
 ## Tests, benchmarks, examples (all ring modes)
 

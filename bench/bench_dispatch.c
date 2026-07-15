@@ -1,6 +1,7 @@
 /**
- * Micro-benchmark: ~3k msg/s across ~1000 keys.
- * Reports dequeue-to-process latency p50/p99 (submit_ns → process entry).
+ * Micro-benchmark: closed-loop burst across many keys.
+ * Latency: submit_ns → end of process() (includes light simulated publish work).
+ * Not an open-loop or real-publisher-accept SLA measurement.
  */
 #include "awp/awp.h"
 
@@ -29,15 +30,17 @@ static uint64_t now_ns(void)
 
 static int bench_process(const awp_frame_t *frame, void *user)
 {
-    uint64_t n = atomic_fetch_add(&g_lat_count, 1);
-    uint64_t dt = now_ns() - frame->submit_ns;
+    uint64_t n;
+    uint64_t dt;
     (void)user;
+    /* Simulate light publish-side work before sampling end-to-process latency. */
+    for (volatile int i = 0; i < 50; i++) {
+    }
+    n = atomic_fetch_add(&g_lat_count, 1);
+    dt = now_ns() - frame->submit_ns;
     if (n < MAX_LAT)
         g_lat_ns[n] = dt;
     atomic_fetch_add(&g_done, 1);
-    /* Simulate light publish work (~1–5 µs). */
-    for (volatile int i = 0; i < 50; i++) {
-    }
     return 0;
 }
 
@@ -111,12 +114,14 @@ int main(int argc, char **argv)
     printf("  throughput: %.0f msg/s  wall_ms=%.2f\n",
            (double)n_msgs / ((double)(t1 - t0) / 1e9),
            (double)(t1 - t0) / 1e6);
-    printf("  latency_ms: p50=%.4f p99=%.4f p99.9=%.4f\n", p50, p99, p999);
+    printf("  latency_ms (submit→process_return): p50=%.4f p99=%.4f p99.9=%.4f\n",
+           p50, p99, p999);
     printf("  drops=%llu process_errors=%llu\n",
            (unsigned long long)m.dropped,
            (unsigned long long)m.process_errors);
-    printf("  target: p99 <= 5.0 ms, drops == 0 → %s\n",
+    printf("  microbench target: p99 <= 5.0 ms, drops == 0 → %s\n",
            (p99 <= 5.0 && m.dropped == 0) ? "PASS" : "FAIL");
+    printf("  note: closed-loop burst; not open-loop publisher-accept SLA\n");
 
     printf("  worst-worker occupancy:\n");
     {
