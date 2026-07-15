@@ -3,7 +3,6 @@
 | Field | Value |
 |-------|-------|
 | Tooling | Independent external review |
-
 | Reviewed commit | `0436973` |
 | **Verdict** | **REJECT** |
 

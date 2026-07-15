@@ -3,7 +3,6 @@
 | Field | Value |
 |-------|-------|
 | Tooling | Independent external review |
-
 | Reviewed commit | `1e8347b` (main after lifecycle fixes + diagrams/benches) |
 | Date (UTC) | 2026-07-15 |
 | Prior rounds | review round 1 estimate → `design-estimate.md`; review round 2 as-implemented → `design-analysis.md` (**REJECT**, mitigations in `c11bab8`) |

@@ -3,7 +3,6 @@
 | Field | Value |
 |-------|-------|
 | Tooling | Independent external review |
-
 | Reviewed commit | `4b1076c` (review round 3 S0 fix pass + adversarial tests) |
 | Date (UTC) | 2026-07-15 |
 | Prior rounds | 1 estimate · 2 analysis REJECT · 3 impl review REJECT · fix `4b1076c` |
