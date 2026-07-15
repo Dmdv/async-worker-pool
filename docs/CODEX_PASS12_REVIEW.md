@@ -2,9 +2,9 @@
 
 | Field | Value |
 |-------|-------|
-| Reviewed | `eb19f04` (Pass 12 + follow-up) |
+| Reviewed | `eb19f04` (Pass 12 + follow-up); post-review `eef90f5` aligned `bench_all_modes` |
 | Prior | Pass 11 ACCEPT_WITH_NITS |
-| **Verdict** | **ACCEPT_WITH_NITS** |
+| **Verdict** | **ACCEPT_WITH_NITS** (all listed Pass 12 nits cleared; remaining bar is external destroy contract only) |
 
 ---
 
