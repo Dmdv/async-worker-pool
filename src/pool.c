@@ -492,15 +492,17 @@ int awp_pool_shutdown(awp_pool_t *pool)
     }
     if (atomic_load(&pool->active_submits) > 0) {
         /*
-         * Do NOT close rings while counted submitters may still publish.
-         * Sticky quarantine; skip drain close path.
+         * Sticky quarantine: do not join/drain under live submitters, but
+         * close every ring so wait_space/wait_data producers wake and exit.
          */
         awp_pool_mark_quarantined(pool);
         note_abort(pool, &aborts);
         can_close = 0;
+        for (i = 0; i < pool->cfg.n_workers; i++)
+            awp_ring_close(&pool->workers[i].queue);
         fprintf(stderr,
                 "[awp] shutdown: active_submits > 0 after deadline; "
-                "quarantine, rings left open\n");
+                "quarantine, rings closed to wake waiters (no drain/join)\n");
     }
 
     atomic_store(&pool->supervisor_stop, 1);
@@ -552,8 +554,10 @@ int awp_pool_shutdown(awp_pool_t *pool)
             }
         }
     } else {
-        /* Cannot safely join while rings may still receive publishes. */
+        /* Quarantine path: rings already closed above when active_submits timed out;
+         * if not (supervisor path), close all rings to wake waiters. */
         for (i = 0; i < pool->cfg.n_workers; i++) {
+            awp_ring_close(&pool->workers[i].queue);
             if (atomic_load(&pool->workers[i].state) == AWP_W_RUNNING ||
                 atomic_load(&pool->workers[i].state) == AWP_W_STARTING) {
                 atomic_store(&pool->workers[i].state, AWP_W_QUARANTINED);
@@ -567,9 +571,12 @@ int awp_pool_shutdown(awp_pool_t *pool)
 
     /* Publish STOPPED only after all shutdown-side pool accesses are done. */
     set_life(pool, AWP_LIFE_STOPPED);
-    /* Surface prior quarantine (e.g. stall/restart) even if local aborts==0. */
-    if (aborts == 0 && atomic_load(&pool->shutdown_aborts) > 0)
-        aborts = (int)atomic_load(&pool->shutdown_aborts);
+    /* Return the higher of local aborts and cumulative pool counter. */
+    {
+        int prior = (int)atomic_load(&pool->shutdown_aborts);
+        if (prior > aborts)
+            aborts = prior;
+    }
     if (aborts == 0 && atomic_load(&pool->quarantined))
         aborts = 1;
     return aborts;
