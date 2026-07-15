@@ -1,0 +1,8 @@
+*.o
+*.a
+*.dSYM/
+build/
+.scratch/
+.DS_Store
+*.log
+/tmp/
