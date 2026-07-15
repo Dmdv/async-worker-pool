@@ -39,14 +39,17 @@ static uint64_t now_ns(void)
 
 static int bench_process(const awp_frame_t *frame, void *user)
 {
-    uint64_t n = atomic_fetch_add(&g_lat_count, 1);
-    uint64_t dt = now_ns() - frame->submit_ns;
+    uint64_t n;
+    uint64_t dt;
     (void)user;
+    /* Simulated light publish work, then sample submit→process_return. */
+    for (volatile int i = 0; i < 50; i++) {
+    }
+    n = atomic_fetch_add(&g_lat_count, 1);
+    dt = now_ns() - frame->submit_ns;
     if (n < MAX_LAT)
         g_lat_ns[n] = dt;
     atomic_fetch_add(&g_done, 1);
-    for (volatile int i = 0; i < 50; i++) {
-    }
     return 0;
 }
 
