@@ -137,40 +137,11 @@ static void *awp_join_helper(void *arg)
 
 int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
 {
-#if defined(__linux__) && defined(_GNU_SOURCE)
-    for (;;) {
-        struct timespec abs;
-        uint64_t now = awp_now_ns();
-        uint64_t rem;
-        int rc;
-        if (now >= deadline_ns)
-            return 1;
-        rem = deadline_ns - now;
-        /* timedjoin_np needs an absolute REALTIME clock; recompute remaining
-         * from MONOTONIC each iteration so wall-clock jumps do not accumulate. */
-        if (clock_gettime(CLOCK_REALTIME, &abs) != 0)
-            return 1; /* treat clock failure as budget exhausted, not unbounded */
-        abs.tv_sec += (time_t)(rem / 1000000000ull);
-        abs.tv_nsec += (long)(rem % 1000000000ull);
-        if (abs.tv_nsec >= 1000000000L) {
-            abs.tv_sec += 1;
-            abs.tv_nsec -= 1000000000L;
-        }
-        rc = pthread_timedjoin_np(thr, NULL, &abs);
-        if (rc == 0)
-            return 0;
-        if (rc == ETIMEDOUT)
-            return 1;
-        if (rc == EINTR)
-            continue;
-        return -rc;
-    }
-#else
+    /* Single portable path: pure CLOCK_MONOTONIC budget (no REALTIME). */
     awp_join_box_t *box;
     pthread_t helper;
     pthread_attr_t attr;
     int rc;
-    struct timespec abs;
     int free_box = 1;
 
     if (awp_now_ns() >= deadline_ns)
@@ -201,10 +172,6 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
         return -rc;
     }
 
-    /*
-     * Poll completion against CLOCK_MONOTONIC only — do not use REALTIME
-     * timedwait (wall-clock steps must not stretch the budget).
-     */
     pthread_mutex_lock(&box->mu);
     while (!box->done) {
         if (awp_now_ns() >= deadline_ns) {
@@ -225,7 +192,6 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
     if (free_box)
         awp_join_box_free(box);
     return rc == 0 ? 0 : -rc;
-#endif
 }
 
 static int join_exited_deadline(awp_worker_t *w, uint64_t deadline_ns)

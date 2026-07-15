@@ -110,7 +110,7 @@ C has no `catch_unwind`. Soft errors **must** be error codes. Hard faults (SIGSE
 5. Else (timeout / unjoined supervisor): **quarantine** — rings closed; stuck callbacks are not cancelled; destroy will leak
 6. `STOPPED`; reclaim on destroy only if joined, not quarantined, no live API refs
 
-Join budget: absolute `CLOCK_MONOTONIC` deadline. Linux uses `pthread_timedjoin_np` with remaining time recomputed each iteration; other platforms use a detached heap helper that joins the target while the waiter polls completion against monotonic time — no cancel/detach of the target.
+Join budget: absolute `CLOCK_MONOTONIC` deadline via a detached heap helper that joins the target while the waiter polls completion against monotonic time — no cancel/detach of the target and no `CLOCK_REALTIME` dependence.
 
 `STOPPED` means the public lifecycle is terminal. It does **not** mean all storage was reclaimed when quarantine is set.
 
