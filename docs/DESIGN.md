@@ -34,18 +34,25 @@ At 5k msg/s and 50 µs service, `N_min ≈ 0.25` — tiny. The binding constrain
 | `src/supervisor.c` | Heartbeat / restart |
 | `src/pool.c` | Create, submit, metrics, shutdown |
 
-## Queue choice
+## Queue choice — all concurrency models
 
-**Atomic bounded MPSC ring** (Vyukov-style cell sequences, C11 `<stdatomic.h>`):
+**Atomic bounded ring** (Vyukov-style cell sequences, C11 `<stdatomic.h>`). Mode is **not** assumed MPSC-only; configure via `awp_config.ring_mode`:
 
-- Multiple venue readers enqueue to the same worker → MPSC via CAS on `enqueue_pos`
-- Single consumer advances `dequeue_pos` (no CAS)
-- Full/empty: spin + `pause`/`yield` backoff — **backpressure, never drop**
+| Mode | Producers | Consumers | Claim enqueue | Claim dequeue |
+|------|-----------|-----------|---------------|---------------|
+| `AWP_RING_SPSC` | 1 | 1 | store | store |
+| `AWP_RING_MPSC` | many | 1 | CAS | store |
+| `AWP_RING_SPMC` | 1 | many | store | CAS |
+| `AWP_RING_MPMC` | many | many | CAS | CAS |
+
+- Default for the worker pool is **MPSC** (N venue readers → one thread per worker) — override when topology differs (e.g. SPSC if one reader owns a shard).
+- Wrong mode for actual concurrency is **UB** (data races on pos claims).
+- Full/empty: spin + `pause`/`yield` — **backpressure, never drop**
 - Capacity rounded up to power of two; cells cache-line padded
 - Memory orders: acquire on sequence load, release after publishing data
 - Depth: lock-free `enqueue_pos - dequeue_pos`
 
-**Why not mutex:** Codex recommended mutex+condvar as a correctness-first trade-off (same class of admission as Go’s runtime locks on channels). For a dispatch hot path we prefer atomics: no lock convoys, no condvar syscalls under load. Blocking is explicit spin/yield, not `pthread_mutex`.
+**Why not mutex:** Codex recommended mutex+condvar as a first-cut trade-off. Hot path uses atomics instead.
 
 **Frame pool:** lock-free freelist of slab indices with ABA tags (Treiber-style packed head).
 

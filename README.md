@@ -8,7 +8,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage (t
 
 - **N fixed workers** created once (never per message)
 - **Producer-side shard**: FNV-1a(`feed || 0x1F || symbol`) → worker index
-- **Bounded MPSC rings** with **C11 atomics** (sequence protocol) — spin/yield backpressure, **never drop** on full
+- **Bounded atomic rings** — **SPSC / MPSC / SPMC / MPMC** (`ring_mode`), sequence protocol, spin/yield backpressure, **never drop**
 - **Preallocated frame pool** (lock-free freelist) — no `malloc`/`free` on the hot path
 - **Dedicated broadcast workers** for mark-price / funding-style feeds
 - **Soft fault isolation**: `process()` errors recycle the frame and continue
@@ -67,7 +67,7 @@ docs/DESIGN.md        Architecture, sizing, test matrix
 
 | Topic | Choice |
 |-------|--------|
-| Queue | Atomic sequence ring (MPSC, CAS enqueue / single-consumer dequeue) |
+| Queue | Atomic sequence ring — SPSC/MPSC/SPMC/MPMC via `ring_mode` |
 | N workers | Config knob for **hash skew** headroom (e.g. 32), not `#cores` |
 | Ordering | Stable hash ⇒ one worker per key ⇒ FIFO by construction |
 | Backpressure | Block producer when full; `drops` must stay 0 |

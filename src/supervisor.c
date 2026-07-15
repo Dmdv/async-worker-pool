@@ -27,11 +27,11 @@ void *awp_supervisor_main(void *arg)
                 !atomic_load(&pool->shutting_down)) {
                 /* Worker exited unexpectedly — rejoin and restart. */
                 uint32_t cap = w->queue.capacity
-                                   ? w->queue.capacity
+                                   ? (uint32_t)w->queue.capacity
                                    : pool->cfg.queue_capacity;
                 pthread_join(w->thread, NULL);
                 awp_ring_destroy(&w->queue);
-                if (awp_ring_init(&w->queue, cap) != 0)
+                if (awp_ring_init(&w->queue, cap, pool->cfg.ring_mode) != 0)
                     continue;
                 atomic_store(&w->last_progress_ns, awp_now_ns());
                 if (awp_worker_start(w) == 0)
@@ -51,7 +51,7 @@ void *awp_supervisor_main(void *arg)
             if (pool->cfg.enable_restart && idle_ms > stall_ms &&
                 awp_ring_depth(&w->queue) > 0) {
                 uint32_t cap = w->queue.capacity
-                                   ? w->queue.capacity
+                                   ? (uint32_t)w->queue.capacity
                                    : pool->cfg.queue_capacity;
                 uint64_t wait_deadline;
                 fprintf(stderr,
@@ -73,7 +73,7 @@ void *awp_supervisor_main(void *arg)
                 }
                 atomic_store(&w->alive, 0);
                 awp_ring_destroy(&w->queue);
-                if (awp_ring_init(&w->queue, cap) != 0)
+                if (awp_ring_init(&w->queue, cap, pool->cfg.ring_mode) != 0)
                     continue;
                 atomic_store(&w->last_progress_ns, awp_now_ns());
                 if (awp_worker_start(w) == 0)

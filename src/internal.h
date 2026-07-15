@@ -71,12 +71,11 @@ static inline uint32_t awp_round_up_pow2(uint32_t v)
     return v + 1;
 }
 
-/* ---- bounded MPSC ring (atomics, Vyukov-style sequences) ---------------- */
+/* ---- bounded ring: SPSC | MPSC | SPMC | MPMC (atomics) ------------------ */
 
 /**
- * Cache-line padded cell: sequence + data pointer.
- * Producers CAS enqueue_pos; single consumer advances dequeue_pos.
- * Memory orders: acquire on sequence load, release on sequence store after data.
+ * Cache-line padded cell: sequence + data pointer (Vyukov-style).
+ * Mode selects store vs CAS on enqueue_pos / dequeue_pos.
  */
 typedef struct awp_cell {
     AWP_ALIGN_CACHE atomic_size_t sequence;
@@ -89,10 +88,11 @@ typedef struct awp_ring {
     awp_cell_t *cells;
     size_t capacity; /* power of two */
     size_t mask;
+    awp_ring_mode_t mode;
     atomic_int closed;
 } awp_ring_t;
 
-int  awp_ring_init(awp_ring_t *r, uint32_t capacity);
+int  awp_ring_init(awp_ring_t *r, uint32_t capacity, awp_ring_mode_t mode);
 void awp_ring_destroy(awp_ring_t *r);
 void awp_ring_close(awp_ring_t *r);
 

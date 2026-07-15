@@ -18,6 +18,7 @@ LIB  := libawp.a
 TEST_UNIT := build/test_unit
 TEST_SUP  := build/test_supervisor
 TEST_E2E  := build/test_e2e
+TEST_RING := build/test_ring_modes
 BENCH     := build/bench_dispatch
 EXAMPLE   := build/simple_publish
 
@@ -45,19 +46,23 @@ $(TEST_SUP): tests/test_supervisor.c $(LIB)
 $(TEST_E2E): tests/test_e2e.c $(LIB)
 	$(CC) $(CFLAGS) -Itests $< -L. -lawp $(LDFLAGS) -o $@
 
+$(TEST_RING): tests/test_ring_modes.c $(LIB)
+	$(CC) $(CFLAGS) -Itests -Isrc $< -L. -lawp $(LDFLAGS) -o $@
+
 $(BENCH): bench/bench_dispatch.c $(LIB)
 	$(CC) $(CFLAGS) $< -L. -lawp $(LDFLAGS) -o $@
 
 $(EXAMPLE): examples/simple_publish.c $(LIB)
 	$(CC) $(CFLAGS) $< -L. -lawp $(LDFLAGS) -o $@
 
-tests: dirs $(TEST_UNIT) $(TEST_SUP) $(TEST_E2E)
+tests: dirs $(TEST_UNIT) $(TEST_SUP) $(TEST_E2E) $(TEST_RING)
 bench: dirs $(BENCH)
 examples: dirs $(EXAMPLE)
 e2e: $(TEST_E2E)
 
 check: all
 	@echo "=== unit ===" && $(TEST_UNIT)
+	@echo "=== ring modes ===" && $(TEST_RING)
 	@echo "=== supervisor ===" && $(TEST_SUP)
 	@echo "=== e2e ===" && $(TEST_E2E)
 	@echo "=== bench ===" && $(BENCH) 3000 1000

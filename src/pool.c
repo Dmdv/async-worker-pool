@@ -9,6 +9,9 @@ void awp_config_init(awp_config_t *cfg)
     cfg->n_workers = 8;
     cfg->queue_capacity = 256;
     cfg->frame_pool_size = 2048;
+    /* Default MPSC: N venue readers → one consumer thread per worker.
+     * Override with AWP_RING_SPSC/SPMC/MPMC when topology differs. */
+    cfg->ring_mode = AWP_RING_MPSC;
     cfg->shutdown_deadline_ms = 10000;
     cfg->supervisor_interval_ms = 500;
     cfg->stall_threshold_ms = 5000;
@@ -77,6 +80,8 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
         return -EINVAL;
     if (cfg->n_broadcast_workers > cfg->n_workers)
         return -EINVAL;
+    if (cfg->ring_mode > AWP_RING_MPMC)
+        return -EINVAL;
 
     pool = calloc(1, sizeof(*pool));
     if (!pool)
@@ -128,7 +133,7 @@ int awp_pool_create(const awp_config_t *cfg, awp_pool_t **out)
         atomic_store(&w->restarts, 0);
         atomic_store(&w->alive, 0);
         atomic_store(&w->stop, 0);
-        rc = awp_ring_init(&w->queue, cfg->queue_capacity);
+        rc = awp_ring_init(&w->queue, cfg->queue_capacity, cfg->ring_mode);
         if (rc != 0)
             goto fail_workers;
     }

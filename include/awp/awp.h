@@ -88,11 +88,30 @@ typedef struct awp_pool_metrics {
     awp_worker_metrics_t *workers; /**< Length n_workers; owned by pool until destroy. */
 } awp_pool_metrics_t;
 
+/**
+ * Per-worker ring concurrency model (C11 atomics; no mutex).
+ * Pick the mode that matches actual producers/consumers — wrong mode is UB.
+ *
+ * | Mode  | Producers | Consumers | Typical use                          |
+ * |-------|-----------|-----------|--------------------------------------|
+ * | SPSC  | 1         | 1         | One venue reader → one worker        |
+ * | MPSC  | many      | 1         | N readers → one worker (default)     |
+ * | SPMC  | 1         | many      | One feeder → multiple consumers      |
+ * | MPMC  | many      | many      | Fully shared queue                   |
+ */
+typedef enum awp_ring_mode {
+    AWP_RING_SPSC = 0,
+    AWP_RING_MPSC = 1,
+    AWP_RING_SPMC = 2,
+    AWP_RING_MPMC = 3
+} awp_ring_mode_t;
+
 /** Pool configuration. Zero then set required fields; use awp_config_init(). */
 typedef struct awp_config {
     uint32_t n_workers;           /**< Shard count; e.g. 32. Min 1. */
-    uint32_t queue_capacity;      /**< Per-worker ring slots. Power-of-two recommended. */
+    uint32_t queue_capacity;      /**< Per-worker ring slots. Rounded up to power of two. */
     uint32_t frame_pool_size;     /**< Total preallocated frames (all workers). */
+    awp_ring_mode_t ring_mode;    /**< Queue concurrency; default MPSC. */
     uint32_t shutdown_deadline_ms;/**< Hard shutdown deadline (default 10000). */
     uint32_t supervisor_interval_ms; /**< Heartbeat check period (default 500). */
     uint32_t stall_threshold_ms;  /**< No progress → consider stalled (default 5000). */
