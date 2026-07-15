@@ -103,6 +103,8 @@ docs/diagrams/        Rendered PNG diagrams
 
 Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 
+Non-blocking residual nits (S3): [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) · [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
+
 Historical design reviews (audit only): [`docs/archive/reviews/`](docs/archive/reviews/).
 
 ## Build, test, install

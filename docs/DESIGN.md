@@ -21,7 +21,9 @@ Authoritative public wording lives in [`include/awp/awp.h`](../include/awp/awp.h
 3. **Quarantine** is sticky and may intentionally leak; treat unexpected quarantine as **process recycle**.
 4. **`cfg.user`** (and publisher state used from `process`) must outlive any quarantined callback.
 
-**Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (accepted with residual nits on the reopen/reclaim series). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
+**Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (**ACCEPT** at `71395f6`). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
+
+Tracked non-blocking S3 nits: [`docs/KNOWN_ISSUES.md`](KNOWN_ISSUES.md) and [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
 
 Historical review dumps: [`docs/archive/reviews/`](archive/reviews/) (commit-scoped; not the live API).
 
@@ -222,6 +224,10 @@ Restart-failure quarantine closed the shard but not the global frame freelist wa
 ### Review round 11–12 **accepted with residual nits**
 
 Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. review round 12 cleaned docs/bench/PNG/tests; residual nits if any are test-depth only.
+
+### Final formal gate (**ACCEPT**, pure-monotonic join)
+
+At `2f29094` / `71395f6`: deadline join is portable detached-helper + monotonic poll only (no REALTIME `timedjoin`). F1–F12 closed. Named S3 residuals from that series are listed in [`KNOWN_ISSUES.md`](KNOWN_ISSUES.md) (#1–#3).
 
 ## Build & verify
 
