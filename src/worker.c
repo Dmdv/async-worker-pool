@@ -94,8 +94,47 @@ int awp_worker_start(awp_worker_t *w)
 
 /**
  * Join thr by absolute CLOCK_MONOTONIC deadline.
- * @return 0 joined, 1 timed out (thread not joined), <0 other error.
+ * @return 0 joined, 1 timed out (OS thread may still be reaped async), <0 error.
+ *
+ * Linux: pthread_timedjoin_np.
+ * Elsewhere: detached heap helper performs join while this thread waits on a
+ * cond with absolute budget — never detaches/cancels the target thread.
  */
+typedef struct {
+    pthread_t target;
+    pthread_mutex_t mu;
+    pthread_cond_t cv;
+    int done;     /* 1 when join finished */
+    int rc;       /* pthread_join result */
+    int released; /* 1 if waiter timed out and freed ownership to helper */
+} awp_join_box_t;
+
+static void awp_join_box_free(awp_join_box_t *b)
+{
+    pthread_cond_destroy(&b->cv);
+    pthread_mutex_destroy(&b->mu);
+    free(b);
+}
+
+static void *awp_join_helper(void *arg)
+{
+    awp_join_box_t *b = (awp_join_box_t *)arg;
+    int rc = pthread_join(b->target, NULL);
+    int free_self = 0;
+
+    pthread_mutex_lock(&b->mu);
+    b->rc = rc;
+    b->done = 1;
+    if (b->released)
+        free_self = 1;
+    pthread_cond_broadcast(&b->cv);
+    pthread_mutex_unlock(&b->mu);
+
+    if (free_self)
+        awp_join_box_free(b);
+    return NULL;
+}
+
 int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
 {
 #if defined(__linux__) && defined(_GNU_SOURCE)
@@ -125,13 +164,86 @@ int awp_pthread_join_deadline(pthread_t thr, uint64_t deadline_ns)
         return -rc;
     }
 #else
-    /* Portable: if budget already exhausted, refuse unbounded join. */
+    awp_join_box_t *box;
+    pthread_t helper;
+    pthread_attr_t attr;
+    int rc;
+    struct timespec abs;
+    int free_box = 1;
+
     if (awp_now_ns() >= deadline_ns)
         return 1;
-    {
-        int rc = pthread_join(thr, NULL);
+
+    box = calloc(1, sizeof(*box));
+    if (!box)
+        return -ENOMEM;
+    box->target = thr;
+    if (pthread_mutex_init(&box->mu, NULL) != 0) {
+        free(box);
+        return -ENOMEM;
+    }
+    if (pthread_cond_init(&box->cv, NULL) != 0) {
+        pthread_mutex_destroy(&box->mu);
+        free(box);
+        return -ENOMEM;
+    }
+    if (pthread_attr_init(&attr) != 0) {
+        awp_join_box_free(box);
+        return -ENOMEM;
+    }
+    (void)pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    rc = pthread_create(&helper, &attr, awp_join_helper, box);
+    pthread_attr_destroy(&attr);
+    if (rc != 0) {
+        awp_join_box_free(box);
+        return -rc;
+    }
+
+    if (clock_gettime(CLOCK_REALTIME, &abs) != 0) {
+        /* Wait until helper finishes if deadline clock fails. */
+        pthread_mutex_lock(&box->mu);
+        while (!box->done)
+            pthread_cond_wait(&box->cv, &box->mu);
+        rc = box->rc;
+        pthread_mutex_unlock(&box->mu);
+        awp_join_box_free(box);
         return rc == 0 ? 0 : -rc;
     }
+    {
+        uint64_t now = awp_now_ns();
+        uint64_t rem = (deadline_ns > now) ? (deadline_ns - now) : 0;
+        abs.tv_sec += (time_t)(rem / 1000000000ull);
+        abs.tv_nsec += (long)(rem % 1000000000ull);
+        if (abs.tv_nsec >= 1000000000L) {
+            abs.tv_sec += 1;
+            abs.tv_nsec -= 1000000000L;
+        }
+    }
+
+    pthread_mutex_lock(&box->mu);
+    while (!box->done) {
+        rc = pthread_cond_timedwait(&box->cv, &box->mu, &abs);
+        if (rc == ETIMEDOUT) {
+            if (box->done)
+                break; /* join completed as wait expired */
+            /* Timeout: helper owns box and will free after join completes. */
+            box->released = 1;
+            free_box = 0;
+            pthread_mutex_unlock(&box->mu);
+            return 1;
+        }
+        if (rc != 0 && rc != EINTR) {
+            box->released = 1;
+            free_box = 0;
+            pthread_mutex_unlock(&box->mu);
+            return -rc;
+        }
+    }
+    rc = box->rc;
+    pthread_mutex_unlock(&box->mu);
+    if (free_box)
+        awp_join_box_free(box);
+    return rc == 0 ? 0 : -rc;
 #endif
 }
 

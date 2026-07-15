@@ -79,6 +79,20 @@ static void test_quarantine_teardown_process_recycle(void)
     shut = awp_pool_shutdown(pool);
     TEST_CHECK(shut > 0, "shutdown >0 on quarantine");
     TEST_EQ_I(atomic_load(&pool->quarantined), 1, "quarantined");
+    /* F3: repeated shutdown must still signal quarantine. */
+    TEST_CHECK(awp_pool_shutdown(pool) > 0, "second shutdown still >0");
+    {
+        awp_pool_metrics_t m;
+        int any_alive = 0;
+        uint32_t wi;
+        TEST_EQ_I(awp_pool_get_metrics(pool, &m), 0, "metrics");
+        /* F4: at least one quarantined worker still reports alive. */
+        for (wi = 0; m.workers && wi < m.n_workers; wi++) {
+            if (m.workers[wi].alive)
+                any_alive = 1;
+        }
+        TEST_CHECK(any_alive == 1, "quarantined worker reports alive");
+    }
     TEST_CHECK(awp_submit(pool, "t", "B", "x", 1, 0) != 0, "submit rejected");
     /* Destroy must not free storage under sticky callback (no crash). */
     awp_pool_destroy(pool);
@@ -195,7 +209,12 @@ static void test_shutdown_wakes_blocked_submitter(void)
 
     shut = awp_pool_shutdown(pool);
     TEST_CHECK(shut > 0, "shutdown >0 with sticky");
-    pthread_join(th, NULL);
+    /* Bounded join of the producer (absolute budget, not indefinite hang). */
+    {
+        uint64_t join_deadline = awp_now_ns() + 2000000000ull; /* 2s */
+        int jrc = awp_pthread_join_deadline(th, join_deadline);
+        TEST_EQ_I(jrc, 0, "submitter join within budget");
+    }
     TEST_CHECK(atomic_load(&ba.finished) == 1, "submitter finished after shutdown");
     /* Rejected or completed after close is OK; hang is not. */
     awp_pool_destroy(pool);
