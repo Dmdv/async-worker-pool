@@ -1,16 +1,16 @@
-# Codex Pass 12 — gpt-5.6-sol xhigh (nit cleanup)
+# Design review pass 12
 
 | Field | Value |
 |-------|-------|
 | Reviewed | `eb19f04` (Pass 12 + follow-up); post-review `eef90f5` aligned `bench_all_modes` |
-| Prior | Pass 11 ACCEPT_WITH_NITS |
-| **Verdict** | **ACCEPT_WITH_NITS** (all listed Pass 12 nits cleared; remaining bar is external destroy contract only) |
+| Prior | Pass 11 ACCEPT WITH NITS |
+| **Verdict** | **ACCEPT WITH NITS** (all listed Pass 12 nits cleared; remaining bar is external destroy contract only) |
 
 ---
 
 ## Verdict
 
-**ACCEPT_WITH_NITS**
+**ACCEPT WITH NITS**
 
 All four Pass 12 nits are cleared at clean HEAD `eb19f04974d628fb8cad9abc3f6b689c737ef598`. No new library-internal UAF or deadlock was found under the documented lifetime contract.
 

@@ -1,17 +1,16 @@
-# Codex Pass 4 — Implementation & specs review (gpt-5.6-sol · xhigh)
+# Design review pass 4
 
 | Field | Value |
 |-------|-------|
-| Model | `gpt-5.6-sol` |
-| Reasoning | `xhigh` (Extra-High) |
-| Mode | `codex exec` read-only |
+| Tooling | Independent external review |
+
 | Reviewed commit | `4b1076c` (Pass 3 S0 fix pass + adversarial tests) |
 | Date (UTC) | 2026-07-15 |
 | Prior passes | 1 estimate · 2 analysis REJECT · 3 impl review REJECT · fix `4b1076c` |
 | This pass | Post-fix re-review of code + specs |
 | **Verdict** | **REJECT** |
 
-Raw log (local): `/Users/dima/c_lang/.scratch/codex-review-p4/run.log`
+Raw log (local): `(local review log; not in repo)`
 
 ---
 
@@ -214,7 +213,7 @@ The binaries are newer than the reviewed sources. A fresh build/sanitizer run wa
 - Consistently call `awp_runtime_enabled()` a caller-owned helper; the example should skip creation when disabled rather than setting the environment variable itself.
 - State that true SPMC/MPMC operation is private/internal unless a public raw-ring API is intended.
 - Describe the implementation as atomic queue reservation plus mutex/condvar notification, and qualify freelist lock freedom by platform.
-- Preserve CODEX reports as historical snapshots. Pass 3 is correctly tied to `1e8347b`; Pass 2 should gain an explicit reviewed commit/banner and replace absolute local links.
+- Preserve review reports as historical snapshots. Pass 3 is correctly tied to `1e8347b`; Pass 2 should gain an explicit reviewed commit/banner and replace absolute local links.
 - Regenerate benchmark evidence at the reviewed commit with raw samples, open-loop schedules, real publisher acceptance, multiple runs, and system telemetry.
 
 ### Top 5 actions ranked by risk reduction

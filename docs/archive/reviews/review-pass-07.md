@@ -1,4 +1,4 @@
-# Codex Pass 7 — Implementation & specs review (gpt-5.6-sol · xhigh)
+# Design review pass 7
 
 | Field | Value |
 |-------|-------|

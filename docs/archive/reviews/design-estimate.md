@@ -22,7 +22,6 @@ Three requirements need precise qualification:
 2. **Bounded latency:** blocking backpressure and an unconditional latency ceiling are mathematically incompatible during sustained overload. The 5 ms target applies only inside a declared arrival-rate, skew, burst, and callback-service envelope.
 3. **Forced shutdown:** portable pthreads cannot safely kill arbitrary callback code. A true ≤10-second bound requires cooperative callback cancellation or process-level termination.
 
-
 ---
 
 ## A. Recommended module breakdown

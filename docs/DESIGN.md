@@ -21,7 +21,7 @@ Authoritative public wording lives in [`include/awp/awp.h`](../include/awp/awp.h
 3. **Quarantine** is sticky and may intentionally leak; treat unexpected quarantine as **process recycle**.
 4. **`cfg.user`** (and publisher state used from `process`) must outlive any quarantined callback.
 
-**Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (`ACCEPT_WITH_NITS` on the reopen/reclaim series). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
+**Assurance status:** library-internal UAF/deadlock under this contract is considered closed at the last formal review (accepted with residual nits on the reopen/reclaim series). Residual product work is integration discipline, target CI, and honest performance claims — not a second destroy model.
 
 Historical review dumps: [`docs/archive/reviews/`](archive/reviews/) (commit-scoped; not the live API).
 
@@ -166,11 +166,11 @@ E2E: `test_e2e_lifecycle`, `test_teardown_contract`, `test_restart_create_fail`.
 
 Frame freelist uses a 32-bit ABA tag. Public qualification: **64-bit hosts** only. Stress tests do not prove safety across a full tag cycle.
 
-### Pass 3 was **REJECT** — residual reclamation / reentrancy
+### Review round 3 was **REJECT** — residual reclamation / reentrancy
 
-Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`archive/reviews/implementation-review.md`](archive/reviews/implementation-review.md)).
+review round 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`archive/reviews/implementation-review.md`](archive/reviews/implementation-review.md)).
 
-### Pass 3 mitigations (post-review fix pass)
+### Review round 3 mitigations (post-review fix pass)
 
 | Residual theme | Fix |
 |----------------|-----|
@@ -186,7 +186,7 @@ New / extended tests: true sticky quarantine + safe destroy, process/on_error re
 
 
 
-### Pass 4 was **REJECT** — residual concurrent destroy / pre-registration
+### Review round 4 was **REJECT** — residual concurrent destroy / pre-registration
 
 Key residual S0 after `4b1076c`:
 
@@ -197,9 +197,9 @@ Full report: [`archive/reviews/review-pass-04.md`](archive/reviews/review-pass-0
 
 
 
-### Pass 5 was **REJECT** — lifetime ownership boundary
+### Review round 5 was **REJECT** — lifetime ownership boundary
 
-Pass 5 (`67a7148`) closed local reclamation bookkeeping (STOPPED under `life_mu`, waiters, no-close on active_submits, join-after-success). Residual architecture:
+review round 5 (`67a7148`) closed local reclamation bookkeeping (STOPPED under `life_mu`, waiters, no-close on active_submits, join-after-success). Residual architecture:
 
 - First-access race before `api_enter` cannot be sealed by in-object counters alone.
 - Concurrent destroy needs single-owner + external API quiescence (or a stable control block).
@@ -209,19 +209,19 @@ Follow-up on main: single-owner destroy, quarantine admission reject, create-rol
 
 
 
-### Pass 6 was **REJECT** — contract + supervisor teardown
+### Review round 6 was **REJECT** — contract + supervisor teardown
 
 At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor unjoined still raced worker teardown. Follow-up: honest exactly-once destroy contract; skip worker close/join if supervisor unjoined; close shard on restart failure; recheck quarantine in submit loop; deadline residual drain.
 
 
-### Pass 7 was **REJECT** — frame-pool wait domain
+### Review round 7 was **REJECT** — frame-pool wait domain
 
 Restart-failure quarantine closed the shard but not the global frame freelist wait. Follow-up: `awp_pool_mark_quarantined` closes/wakes the frame pool; submit rechecks quarantine after acquire.
 
 
-### Pass 11–12 **ACCEPT_WITH_NITS**
+### Review round 11–12 **accepted with residual nits**
 
-Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. Pass 12 cleaned docs/bench/PNG/tests; residual nits if any are test-depth only.
+Library-internal permanent-block/UAF findings under the exactly-once destroy contract are closed. review round 12 cleaned docs/bench/PNG/tests; residual nits if any are test-depth only.
 
 ## Build & verify
 

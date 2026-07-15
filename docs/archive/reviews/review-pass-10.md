@@ -1,4 +1,4 @@
-# Codex Pass 10 — gpt-5.6-sol xhigh
+# Design review pass 10
 
 | Field | Value |
 |-------|-------|

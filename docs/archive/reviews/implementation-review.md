@@ -1,17 +1,16 @@
-# Codex Pass 3 — Implementation & specs review (gpt-5.6-sol · xhigh)
+# Design review pass 3
 
 | Field | Value |
 |-------|-------|
-| Model | `gpt-5.6-sol` |
-| Reasoning | `xhigh` (Extra-High) |
-| Mode | `codex exec` read-only |
+| Tooling | Independent external review |
+
 | Reviewed commit | `1e8347b` (main after lifecycle fixes + diagrams/benches) |
 | Date (UTC) | 2026-07-15 |
 | Prior passes | Pass 1 estimate → `design-estimate.md`; Pass 2 as-implemented → `design-analysis.md` (**REJECT**, mitigations in `c11bab8`) |
 | This pass | Adversarial re-review of **code + specs** after mitigations |
 | **Verdict** | **REJECT** |
 
-Raw run log (local scratch, not committed): `~/.scratch` equivalent under `/Users/dima/c_lang/.scratch/codex-review/run.log`.
+Raw run log (local scratch, not committed): `(local review log; not in repo)` equivalent under `(local review log; not in repo)`.
 
 ---
 

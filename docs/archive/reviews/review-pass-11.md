@@ -1,13 +1,13 @@
-# Codex Pass 11 — gpt-5.6-sol xhigh
+# Design review pass 11
 
 | Field | Value |
 |-------|-------|
 | Reviewed | `6c9796a` |
-| **Verdict** | **ACCEPT_WITH_NITS** |
+| **Verdict** | **ACCEPT WITH NITS** |
 
 ---
 
-## Verdict: ACCEPT_WITH_NITS
+## Verdict: ACCEPT WITH NITS
 
 ### Summary
 

@@ -1,9 +1,9 @@
-# Codex Pass 6 — Implementation & specs review (gpt-5.6-sol · xhigh)
+# Design review pass 6
 
 | Field | Value |
 |-------|-------|
-| Model | `gpt-5.6-sol` |
-| Reasoning | `xhigh` |
+| Tooling | Independent external review |
+
 | Reviewed commit | `0436973` |
 | **Verdict** | **REJECT** |
 
@@ -16,14 +16,14 @@ Reviewed clean `main` at `0436973`:
 ```text
 0436973 fix: Pass 5 residual — single-owner destroy, quarantine admission
 67a7148 Fix Pass 4 S0/S1 reclamation, join, supervisor ownership
-a6d3616 docs: Codex gpt-5.6-sol xhigh Pass 4 review (REJECT)
+a6d3616 docs: review external high-depth review Pass 4 review (REJECT)
 ```
 
 ### Executive summary
 
 Pass 5’s local lifetime repairs remain intact: lifecycle publication is under `life_mu`, registered shutdown waiters are protected through result sampling, rings are not closed while `active_submits` remain, and join state is recorded only after successful joins. Create rollback now safely leaks after an uncertain join.
 
-However, HEAD is not ready for `ACCEPT_WITH_NITS`:
+However, HEAD is not ready for `ACCEPT WITH NITS`:
 
 - The public contract promises concurrent/double destroy safety, but an in-object CAS cannot protect a destroyer that reaches the CAS after another destroyer has reclaimed the object. As documented, this remains S0.
 - An unjoined supervisor can still join/reopen a worker while shutdown closes/joins/drains it. This is a library-internal S1 race independent of external quiescence.
@@ -47,7 +47,7 @@ A sequential second destroy is likewise necessarily a dangling-pointer access. T
 
 The external-quiescence language at [awp.h:204](include/awp/awp.h:204) does not resolve the contradiction: it says threads that have “entered” an API are distinguished, but shutdown has no whole-call registration. A shutdown caller can pause between its lifecycle load and CAS at [pool.c:457](src/pool.c:457) and still be invisible to both `api_refs` and `shutdown_waiters`.
 
-Judgment on item 4: the first-access race is `ACCEPT_WITH_NITS` only under a stricter contract stating:
+Judgment on item 4: the first-access race is `ACCEPT WITH NITS` only under a stricter contract stating:
 
 > Destroy exactly once, externally serialized, only after joining every thread that can hold, use, or begin using the handle.
 

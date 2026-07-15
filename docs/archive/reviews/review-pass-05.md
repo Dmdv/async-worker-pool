@@ -1,9 +1,9 @@
-# Codex Pass 5 — Implementation & specs review (gpt-5.6-sol · xhigh)
+# Design review pass 5
 
 | Field | Value |
 |-------|-------|
-| Model | `gpt-5.6-sol` |
-| Reasoning | `xhigh` |
+| Tooling | Independent external review |
+
 | Reviewed commit | `67a7148` (Pass 4 S0/S1 fix pass) |
 | Date (UTC) | 2026-07-15 |
 | **Verdict** | **REJECT** |
