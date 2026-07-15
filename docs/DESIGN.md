@@ -134,7 +134,8 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 |------|----------|--------|---------|
 | 1 — estimate | [`CODEX_DESIGN_ESTIMATE.md`](CODEX_DESIGN_ESTIMATE.md) | Greenfield design (mutex MPSC recommended) | plan |
 | 2 — analysis | [`CODEX_DESIGN_ANALYSIS.md`](CODEX_DESIGN_ANALYSIS.md) | As-implemented atomics multi-mode design | **REJECT** (mitigations in `c11bab8`) |
-| 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** |
+| 3 — impl+specs | [`CODEX_IMPLEMENTATION_REVIEW.md`](CODEX_IMPLEMENTATION_REVIEW.md) | Post-mitigation code + docs re-review (`1e8347b`) | **REJECT** (fixes in `4b1076c`) |
+| 4 — re-review | [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md) | Post-fix re-review of impl + specs (`4b1076c`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -169,6 +170,17 @@ Pass 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory
 | Supervisor not joined | Past deadline without join → quarantine (never free under live supervisor) |
 
 New / extended tests: true sticky quarantine + safe destroy, process/on_error reentrancy, try_push backpressure, restart with concurrent producers.
+
+
+
+### Pass 4 was **REJECT** — residual concurrent destroy / pre-registration
+
+Key residual S0 after `4b1076c`:
+
+1. `STOPPED` published before shutdown finishes using `life_mu` → destroy can free under shutdown.
+2. Pre-registration / untracked public readers cannot be made safe by in-object counters alone; destroy must be externally serialized or use a stable handle.
+
+Full report: [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md).
 
 ## Build & verify
 
