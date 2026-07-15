@@ -336,6 +336,15 @@ int awp_submit(awp_pool_t *pool,
             awp_api_leave(pool);
             return -1;
         }
+        /* Acquire can block; recheck terminal states before holding a frame. */
+        if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
+            atomic_load(&pool->quarantined) ||
+            atomic_load(&pool->destroy_started)) {
+            awp_frame_pool_release(&pool->frames, f);
+            atomic_fetch_sub(&pool->active_submits, 1);
+            awp_api_leave(pool);
+            return -EINVAL;
+        }
 
         memcpy(f->feed, feed, flen);
         f->feed[flen] = '\0';
@@ -575,7 +584,7 @@ void awp_pool_destroy(awp_pool_t *pool)
         return;
     }
 
-    /* Single destroy owner — concurrent/double destroy is a no-op. */
+    /* Single destroy owner among live callers (exactly-once per handle). */
     if (!atomic_compare_exchange_strong(&pool->destroy_started, &expected, 1))
         return;
 

@@ -206,11 +206,14 @@ int   awp_worker_start(awp_worker_t *w);
 /** Join with absolute deadline_ns (CLOCK_MONOTONIC). */
 int   awp_worker_join_deadline(awp_worker_t *w, uint64_t deadline_ns, int *aborted);
 
-/** Sticky leak flag: pool storage must not be reclaimed. */
+/** Sticky leak flag: pool storage must not be reclaimed; wake parked submitters. */
 static inline void awp_pool_mark_quarantined(awp_pool_t *pool)
 {
-    if (pool)
-        atomic_store(&pool->quarantined, 1);
+    if (!pool)
+        return;
+    atomic_store(&pool->quarantined, 1);
+    /* Unblock frame-pool waiters so they can observe quarantine and exit. */
+    awp_frame_pool_close(&pool->frames);
 }
 
 /** Count a public API entry (must pair with leave). */

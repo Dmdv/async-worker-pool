@@ -138,6 +138,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 | 4 — re-review | [`CODEX_PASS4_REVIEW.md`](CODEX_PASS4_REVIEW.md) | Post-fix re-review of impl + specs (`4b1076c`) | **REJECT** |
 | 5 — re-review | [`CODEX_PASS5_REVIEW.md`](CODEX_PASS5_REVIEW.md) | After Pass 4 fixes (`67a7148`) | **REJECT** |
 | 6 — re-review | [`CODEX_PASS6_REVIEW.md`](CODEX_PASS6_REVIEW.md) | After residual single-owner destroy (`0436973`) | **REJECT** |
+| 7 — re-review | [`CODEX_PASS7_REVIEW.md`](CODEX_PASS7_REVIEW.md) | After Pass 6 contract/teardown (`5c40ee8`) | **REJECT** |
 
 ### Pass 2 was **REJECT** — mitigations landed (`c11bab8`)
 
@@ -201,6 +202,11 @@ Follow-up on main: single-owner destroy, quarantine admission reject, create-rol
 ### Pass 6 was **REJECT** — contract + supervisor teardown
 
 At `0436973`: concurrent destroy promise contradicted free-after-CAS; supervisor unjoined still raced worker teardown. Follow-up: honest exactly-once destroy contract; skip worker close/join if supervisor unjoined; close shard on restart failure; recheck quarantine in submit loop; deadline residual drain.
+
+
+### Pass 7 was **REJECT** — frame-pool wait domain
+
+Restart-failure quarantine closed the shard but not the global frame freelist wait. Follow-up: `awp_pool_mark_quarantined` closes/wakes the frame pool; submit rechecks quarantine after acquire.
 
 ## Build & verify
 
