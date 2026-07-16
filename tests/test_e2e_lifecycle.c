@@ -98,14 +98,38 @@ static void test_concurrent_shutdown(void)
     awp_pool_destroy(pool);
 }
 
+static uint64_t pool_restart_total(awp_pool_t *pool)
+{
+    awp_pool_metrics_t m;
+    uint64_t restarts = 0;
+    int i;
+
+    awp_pool_get_metrics(pool, &m);
+    for (i = 0; i < (int)m.n_workers; i++)
+        restarts += m.workers[i].restarts;
+    return restarts;
+}
+
+/** Wait until supervisor has completed at least one worker restart. */
+static int wait_restarts_ge(awp_pool_t *pool, uint64_t need, unsigned timeout_ms)
+{
+    unsigned waited = 0;
+
+    while (waited < timeout_ms) {
+        if (pool_restart_total(pool) >= need)
+            return 0;
+        test_sleep_ms(10);
+        waited += 10;
+    }
+    return -1;
+}
+
 static void test_restart_preserves_progress(void)
 {
     awp_config_t cfg;
     awp_pool_t *pool = NULL;
     test_ctx_t ctx;
-    awp_pool_metrics_t m;
     int i;
-    uint64_t restarts = 0;
 
     printf("e2e_lifecycle restart preserves ability to process\n");
     test_ctx_init(&ctx);
@@ -121,8 +145,14 @@ static void test_restart_preserves_progress(void)
     cfg.user = &ctx;
 
     TEST_EQ_I(awp_pool_create(&cfg, &pool), 0, "create");
+    /*
+     * Cooperative death: stop alone is insufficient while blocked in
+     * ring_pop; close wakes the waiter so the worker reaches EXITED and
+     * the supervisor can restart before we assert the metric.
+     */
     atomic_store(&pool->workers[2].stop, 1);
-    test_sleep_ms(500);
+    awp_ring_close(&pool->workers[2].queue);
+    TEST_EQ_I(wait_restarts_ge(pool, 1, 3000), 0, "restart counted");
 
     for (i = 0; i < 80; i++) {
         char sym[16];
@@ -131,11 +161,7 @@ static void test_restart_preserves_progress(void)
     }
     wait_processed(&ctx, 80, 8000);
     TEST_EQ_U64(atomic_load(&ctx.count), 80, "all after restart path");
-
-    awp_pool_get_metrics(pool, &m);
-    for (i = 0; i < (int)m.n_workers; i++)
-        restarts += m.workers[i].restarts;
-    TEST_CHECK(restarts >= 1, "restart counted");
+    TEST_CHECK(pool_restart_total(pool) >= 1, "restart still counted");
 
     awp_pool_shutdown(pool);
     awp_pool_destroy(pool);
@@ -148,8 +174,6 @@ static void test_restart_with_queued_work(void)
     awp_pool_t *pool = NULL;
     test_ctx_t ctx;
     int i;
-    uint64_t restarts = 0;
-    awp_pool_metrics_t m;
 
     printf("e2e_lifecycle restart with concurrent producers after exit\n");
     test_ctx_init(&ctx);
@@ -173,7 +197,7 @@ static void test_restart_with_queued_work(void)
 
     atomic_store(&pool->workers[0].stop, 1);
     awp_ring_close(&pool->workers[0].queue);
-    test_sleep_ms(400);
+    TEST_EQ_I(wait_restarts_ge(pool, 1, 3000), 0, "restart observed");
 
     for (i = 0; i < 60; i++) {
         char sym[16];
@@ -182,11 +206,7 @@ static void test_restart_with_queued_work(void)
     }
     wait_processed(&ctx, 100, 8000);
     TEST_EQ_U64(atomic_load(&ctx.count), 100, "all pre+post restart processed");
-
-    awp_pool_get_metrics(pool, &m);
-    for (i = 0; i < (int)m.n_workers; i++)
-        restarts += m.workers[i].restarts;
-    TEST_CHECK(restarts >= 1, "restart observed");
+    TEST_CHECK(pool_restart_total(pool) >= 1, "restart still observed");
 
     awp_pool_shutdown(pool);
     awp_pool_destroy(pool);
