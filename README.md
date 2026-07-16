@@ -105,7 +105,7 @@ Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.m
 
 Non-blocking residual nits (S3): [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) · [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
 
-Historical design reviews (audit only): [`docs/archive/reviews/`](docs/archive/reviews/).
+Historical design-review dumps are **not** published in the repository (local-only under `docs/archive/reviews/` if present).
 
 ## Build, test, install
 

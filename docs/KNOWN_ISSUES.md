@@ -44,7 +44,7 @@ that branch (unlike restart `pthread_create` injection).
 
 - Process-recycle after quarantine (product/ops, already in the lifetime contract)
 - Open-loop publisher-accept SLA (not claimed; see `docs/BENCHMARKS.md`)
-- Historical REJECT rounds (audit only under `docs/archive/reviews/`)
+- Historical REJECT rounds (local-only under `docs/archive/reviews/` if present; untracked)
 
 ## Gate reference
 

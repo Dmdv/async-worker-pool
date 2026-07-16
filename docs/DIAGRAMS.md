@@ -162,4 +162,4 @@ Restart **reopens** the ring only while `RUNNING`; if shutdown wins mid-restart,
 
 - [`DESIGN.md`](DESIGN.md) — full architecture write-up
 - [`BENCHMARKS.md`](BENCHMARKS.md) — measured latency/throughput
-- [`archive/reviews/design-analysis.md`](archive/reviews/design-analysis.md) — historical S0/S1 findings and mitigations
+- Historical S0/S1 dumps: local-only under `docs/archive/reviews/` if present (untracked)

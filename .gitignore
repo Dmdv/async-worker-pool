@@ -8,3 +8,6 @@ awp.pc
 .DS_Store
 *.log
 /tmp/
+
+# Local historical review dumps (not published in the repo)
+docs/archive/reviews/

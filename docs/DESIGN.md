@@ -25,7 +25,7 @@ Authoritative public wording lives in [`include/awp/awp.h`](../include/awp/awp.h
 
 Tracked non-blocking S3 nits: [`docs/KNOWN_ISSUES.md`](KNOWN_ISSUES.md) and [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
 
-Historical review dumps: [`docs/archive/reviews/`](archive/reviews/) (commit-scoped; not the live API).
+Historical review dumps (if kept locally under `docs/archive/reviews/`) are **untracked** and are not the live API.
 
 ## Why not N = cores?
 
@@ -149,7 +149,7 @@ Decisive post-deploy signal: **worst-worker HWM / blocked time**, not total CPU.
 
 ## Historical reviews and residual mitigations
 
-Commit-scoped review artifacts: [`docs/archive/reviews/`](archive/reviews/) (audit only; not the live contract). Final formal gate before productization: accepted with residual nits.
+Commit-scoped review artifacts were archived locally under `docs/archive/reviews/` (untracked; audit only, not the live contract). Final formal gate before productization: accepted with residual nits.
 
 | Issue class (from early reviews) | Fix in tree |
 |----------------------------------|-------------|
@@ -171,7 +171,7 @@ Frame freelist uses a 32-bit ABA tag. Public qualification: **64-bit hosts** onl
 
 ### Review round 3 was **REJECT** — residual reclamation / reentrancy
 
-review round 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters (see [`archive/reviews/implementation-review.md`](archive/reviews/implementation-review.md)).
+review round 3 re-verified prior mitigations against `1e8347b`. Steady-state ring memory orders look fine; residual **S0** clusters were documented in the historical implementation review (local archive only).
 
 ### Review round 3 mitigations (post-review fix pass)
 
@@ -196,7 +196,7 @@ Key residual S0 after `4b1076c`:
 1. `STOPPED` published before shutdown finishes using `life_mu` → destroy can free under shutdown.
 2. Pre-registration / untracked public readers cannot be made safe by in-object counters alone; destroy must be externally serialized or use a stable handle.
 
-Full report: [`archive/reviews/review-pass-04.md`](archive/reviews/review-pass-04.md).
+Full report lived in the historical review-pass-04 dump (local archive only).
 
 
 
