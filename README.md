@@ -101,11 +101,15 @@ docs/diagrams/        Rendered PNG diagrams
 | Backpressure | Block producer when full; `drops` must stay 0 |
 | Shutdown | Quiesce → close rings/pool → join under wait budget → **quarantine** stuck callbacks |
 
-Full write-up: [`docs/DESIGN.md`](docs/DESIGN.md) · diagrams: [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) · benches: [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) · market positioning: [`docs/PERFORMANCE_COMPARISON.md`](docs/PERFORMANCE_COMPARISON.md).
+## Documentation
 
-Non-blocking residual nits (S3): [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) · [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues).
-
-Historical design-review dumps are **not** published in the repository (local-only under `docs/archive/reviews/` if present).
+| Document | Contents |
+|----------|----------|
+| [`docs/DESIGN.md`](docs/DESIGN.md) | Architecture, lifecycle contract, mitigations |
+| [`docs/DIAGRAMS.md`](docs/DIAGRAMS.md) | Architecture / submit / lifecycle diagrams |
+| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Local latency & throughput captures |
+| [`docs/PERFORMANCE_COMPARISON.md`](docs/PERFORMANCE_COMPARISON.md) | AWP vs market queues / pools / HFT stacks |
+| [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md) | Residual S3 nits · [GitHub issues](https://github.com/Dmdv/async-worker-pool/issues) |
 
 ## Build, test, install
 
