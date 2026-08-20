@@ -26,7 +26,7 @@ static void test_same_key_same_worker_fifo(void)
     test_ctx_init(&ctx);
     awp_config_init(&cfg);
     cfg.n_workers = 8;
-    cfg.queue_capacity = 64;
+    cfg.queue_capacity = 256;
     cfg.frame_pool_size = 512;
     cfg.process = test_process;
     cfg.user = &ctx;
