@@ -25,14 +25,14 @@ High-scale verification (1,000,000+ messages) comparing C11 (`libawp`), Rust FFI
 
 ## 1. Cross-Language Comparative Summary (1,000,000 Messages)
 
-Workload: **1,000,000 messages** processed asynchronously across worker threads on Apple Silicon Performance Cores.
+Workload: **1,000,000 messages** processed asynchronously (Zig: 4 Pinned Workers on Apple Silicon P-Cores; C11: 32 Workers).
 
 | Implementation | Mode / API | Throughput | Median (p50) | p99 Latency | Mean Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async (4 Pinned Workers) | **5.38 M msg/s** 🚀 | **< 100 ns** | **1.00 µs** (1,000 ns) | **547.0 ns** (0.55 µs) |
 | **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **171.76 M ops/s** 🚀 | **< 6 ns** | **< 8 ns** | **5.82 ns** |
-| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3.46 µs** (3,458 ns) | **1.11 ms** (1,110,000 ns) | **2.11 µs** (2,109 ns) |
-| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **< 20 ns** | **16.00 ns** |
+| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit (32 Workers) | **0.52 M msg/s** | **3.46 µs** (3,458 ns) | **1.11 ms** (1,110,000 ns) | **2.11 µs** (2,109 ns) |
+| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **N/A (Bulk)** | **N/A (Bulk)** | **16.00 ns** (avg) |
 | **Rust** ([`awp-rs`](../bindings/rust)) | Safe FFI Zero-Copy (`v0.3.0`) | **0.53 M msg/s** | **3.35 µs** (3,350 ns) | **1.15 ms** (1,150,000 ns) | **1.87 µs** (1,870 ns) |
 
 ---
