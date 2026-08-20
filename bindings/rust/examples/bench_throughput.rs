@@ -1,10 +1,10 @@
-use awp_rs::{AsyncWorkerPool, AwpRingMode};
+use awp_rs::{AwpRingMode, PoolBuilder};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
 fn main() {
-    println!("=== AWP Rust FFI Benchmark (1,000,000 Messages) ===");
+    println!("=== AWP Rust FFI Benchmark (1,000,000 Messages, 32 Workers) ===");
 
     let num_messages: usize = 1_000_000;
     let workers: u32 = 32;
@@ -13,13 +13,18 @@ fn main() {
     let processed = Arc::new(AtomicUsize::new(0));
     let proc_clone = processed.clone();
 
-    let pool = AsyncWorkerPool::new(workers, queue_capacity, AwpRingMode::Mpsc, move |_frame| {
-        proc_clone.fetch_add(1, Ordering::Relaxed);
-        0
-    })
-    .expect("Failed to create worker pool");
+    let pool = PoolBuilder::new()
+        .workers(workers)
+        .queue_capacity(queue_capacity)
+        .ring_mode(AwpRingMode::Mpsc)
+        .supervisor(false)
+        .build(move |_frame| {
+            proc_clone.fetch_add(1, Ordering::Relaxed);
+            0
+        })
+        .expect("Failed to create worker pool");
 
-    println!("Pool initialized with {} workers. Starting dispatch...", workers);
+    println!("Pool initialized. Starting Zero-Copy Claim/Commit dispatch...");
 
     let start = Instant::now();
 

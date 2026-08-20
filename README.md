@@ -43,7 +43,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 | **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **65.32 M ops/s** 🚀 | **< 15 ns** | **15.31 ns** | **15.31 ms** |
 | **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3,458 ns** (3.46 µs) | **2,109.45 ns** (2.11 µs) | **1,936.02 ms** |
 | **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **16.00 ns** | **16.00 ms** |
-| **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI + Zero-Copy Claim | **0.50 M msg/s** | **3,480 ns** (3.48 µs) | **2,150.00 ns** (2.15 µs) | **2,150.00 ms** |
+| **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI Zero-Copy (`v0.3.0`) | **0.53 M msg/s** | **3,350 ns** (3.35 µs) | **1,870.17 ns** (1.87 µs) | **1,870.17 ms** |
 
 ### Detailed Tail Latencies Breakdown (1,000,000 Messages)
 

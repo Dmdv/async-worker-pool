@@ -21,8 +21,8 @@ fig, ax = plt.subplots(figsize=(10.5, 6.2), dpi=300)
 fig.patch.set_facecolor('#0d1117')
 ax.set_facecolor('#161b22')
 
-categories = ['Zig 0.16\n(Arena + Slabs)', 'C11 libawp\n(Zero-Copy)', 'Rust awp-rs\n(Safe FFI)']
-throughputs = [3.49, 0.52, 0.50]
+categories = ['Zig 0.16\n(Arena + Slabs)', 'C11 libawp\n(Zero-Copy)', 'Rust awp-rs\n(v0.3.0 FFI)']
+throughputs = [3.49, 0.52, 0.53]
 colors = ['#F7A41D', '#007ACC', '#DEA584']
 
 bars = ax.bar(categories, throughputs, color=colors, width=0.42, edgecolor='#30363d', linewidth=1.5, zorder=3)

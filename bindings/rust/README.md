@@ -1,44 +1,51 @@
-# awp-rs: Safe Rust FFI Bindings for Async Worker Pool
+# awp-rs: Safe & Idiomatic Rust FFI Bindings for Async Worker Pool
 
-High-performance, memory-safe Rust bindings for the `libawp` C11 asynchronous worker pool engine.
+High-performance, zero-allocation Rust bindings for the `libawp` C11 asynchronous worker pool engine.
 
 [![Crate](https://img.shields.io/badge/crate-awp--rs-orange.svg)](bindings/rust)
-[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.3.0-green.svg)](bindings/rust)
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](../../LICENSE)
 
 ---
 
 ## Table of Contents
 
 - [Overview](#overview)
-- [Key Features](#key-features)
+- [Key Features (v0.3.0)](#key-features-v030)
 - [Quick Start](#quick-start)
 - [Usage Examples](#usage-examples)
-  - [Standard Message Submission](#1-standard-submission)
-  - [Zero-Copy Claim & Commit API](#2-zero-copy-claim--commit-api)
+  - [1. Fluent PoolBuilder Configuration](#1-fluent-poolbuilder-configuration)
+  - [2. Zero-Allocation Message Submission](#2-zero-allocation-message-submission)
+  - [3. Two-Phase Zero-Copy Claim & Commit API](#3-two-phase-zero-copy-claim--commit-api)
+  - [4. Zero-Copy Typed Struct Serialization](#4-zero-copy-typed-struct-serialization)
 - [Performance Benchmarks](#performance-benchmarks)
+- [Error Handling](#error-handling)
 - [FFI Architecture & Safety](#ffi-architecture--safety)
-- [Testing & Verification](#testing--verification)
 
 ---
 
 ## Overview
 
-`awp-rs` bridges Rust applications to the ultra-low-latency `libawp` engine. It provides idiomatic Rust ergonomics (RAII lifecycle, `Send + Sync` safety guarantees, and zero-allocation closures) without sacrificing raw C performance.
+`awp-rs` provides safe, idiomatic Rust ergonomics over the ultra-low-latency `libawp` engine:
+- **Zero dynamic allocations** on the hot path (stack-buffered string parsing, in-place zero-copy slabs).
+- **Safe RAII lifecycle**: Guaranteed teardown with quarantine detection on drop.
+- **`Send + Sync` thread safety**: Designed for multi-producer market data dispatch.
 
 ---
 
-## Key Features
+## Key Features (v0.3.0)
 
-- **Safe RAII Lifecycle**: `AsyncWorkerPool` automatically calls `awp_pool_shutdown()` and `awp_pool_destroy()` on drop.
-- **Zero-Copy Claim & Commit**: Direct mutable access to cache-aligned ring buffer slots via `ClaimGuard` (avoids heap allocation and `memcpy`).
-- **Lock-Free Concurrency**: Configurable ring modes (`Mpsc`, `Spsc`, `Mpmc`, `Spmc`).
-- **Native Rust Closures**: Pass standard Rust closures `Fn(FrameView) -> i32 + Send + Sync` as message handlers.
+- **`PoolBuilder`**: Fine-grained configuration of worker counts, ring capacity, supervisor heartbeats, and broadcast slots.
+- **Zero-Alloc Submissions**: Fast-path stack buffers avoid heap allocations (`malloc`) on every message.
+- **Typed Zero-Copy Serialization**: Direct reads/writes of plain-old-data (POD) structs via `guard.write_struct(&item)` and `frame.payload_as::<T>()`.
+- **Typed `AwpError`**: Idiomatic error enum implementing `std::error::Error` and `Display`.
+- **Safe Discard on Drop**: Abandoned `ClaimGuard`s do not publish corrupt frames to worker queues.
 
 ---
 
 ## Quick Start
 
-### 1. Build and Run Tests
+### 1. Run Unit Tests
 
 ```bash
 cd bindings/rust
@@ -55,43 +62,69 @@ cargo run --release --example bench_throughput
 
 ## Usage Examples
 
-### 1. Standard Submission
+### 1. Fluent `PoolBuilder` Configuration
 
 ```rust
-use awp_rs::{AsyncWorkerPool, AwpRingMode};
+use awp_rs::{AwpRingMode, PoolBuilder};
 
-fn main() -> Result<(), i32> {
-    // Initialize pool with 8 workers, 1024 queue capacity per worker
-    let pool = AsyncWorkerPool::new(8, 1024, AwpRingMode::Mpsc, |frame| {
-        println!("Received seq {} on shard {}: {:?}", 
-                 frame.seq(), frame.shard(), frame.payload());
-        0 // return 0 for success
-    })?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = PoolBuilder::new()
+        .workers(32)
+        .queue_capacity(4096)
+        .ring_mode(AwpRingMode::Mpsc)
+        .supervisor(true)
+        .shutdown_deadline_ms(5_000)
+        .build(|frame| {
+            println!("Received seq {} on feed {}: {:?}", 
+                     frame.seq(), frame.feed(), frame.payload());
+            0 // 0 = success, non-zero = soft error counted by telemetry
+        })?;
 
-    // Submit a market data trade event
-    pool.submit("trades", "BTCUSDT", b"{\"price\": 65000.5, \"qty\": 0.1}", 0)?;
-
-    // Pool automatically shuts down and drains on drop
+    pool.submit("trades", "BTCUSDT", b"{\"price\": 65000.5}", 0)?;
     Ok(())
 }
 ```
 
-### 2. Zero-Copy Claim & Commit API
+### 2. Zero-Allocation Message Submission
+
+```rust
+use awp_rs::{AsyncWorkerPool, AwpRingMode};
+use std::ffi::CStr;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = AsyncWorkerPool::new(16, 1024, AwpRingMode::Mpsc, |_| 0)?;
+
+    // 1. Standard zero-allocation stack submission (&str)
+    pool.submit("binance_depth", "BTCUSDT", b"depth_snapshot", 0)?;
+
+    // 2. Ultra-fast pre-formatted CStr submission (0 parsing overhead)
+    let feed = CStr::from_bytes_with_nul(b"quotes\0")?;
+    let symbol = CStr::from_bytes_with_nul(b"ETHUSDT\0")?;
+    pool.submit_cstr(feed, symbol, b"quote_tick", 0)?;
+
+    // 3. Keyed submission (bypasses hash computation)
+    pool.submit_keyed(123456789, "quotes", "ETHUSDT", b"quote_tick", 0)?;
+
+    Ok(())
+}
+```
+
+### 3. Two-Phase Zero-Copy Claim & Commit API
 
 ```rust
 use awp_rs::{AsyncWorkerPool, AwpRingMode};
 
-fn main() -> Result<(), i32> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = AsyncWorkerPool::new(16, 2048, AwpRingMode::Mpsc, |frame| {
-        // Direct read from slab
-        let data = frame.payload();
-        assert_eq!(data.len(), 64);
+        assert_eq!(frame.feed(), "okx_trades");
+        assert_eq!(frame.symbol(), "BTCUSDT");
+        println!("Received {} bytes in-place", frame.payload().len());
         0
     })?;
 
     let target_shard = 0;
 
-    // Claim a slot in the ring buffer without copying
+    // 1. Claim a slot directly in the ring slab without copying
     let mut guard = loop {
         match pool.claim(target_shard) {
             Ok(g) => break g,
@@ -99,12 +132,60 @@ fn main() -> Result<(), i32> {
         }
     };
 
-    // In-place zero-copy serialization directly into ring slab
-    let buf = guard.payload_mut();
-    buf[..64].fill(0xAA);
-    guard.set_payload_len(64);
+    // 2. Set metadata in-place
+    guard.set_feed("okx_trades")?;
+    guard.set_symbol("BTCUSDT")?;
 
-    // Commit to make available to worker
+    // 3. Write directly into ring payload memory
+    let buf = guard.payload_mut();
+    buf[..32].fill(0xAA);
+    guard.set_payload_len(32);
+
+    // 4. Commit to make available to the worker thread
+    guard.commit()?;
+
+    Ok(())
+}
+```
+
+### 4. Zero-Copy Typed Struct Serialization
+
+```rust
+use awp_rs::{AsyncWorkerPool, AwpRingMode};
+
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct MarketTick {
+    timestamp_ns: u64,
+    bid: f64,
+    ask: f64,
+    volume: f64,
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let pool = AsyncWorkerPool::new(16, 2048, AwpRingMode::Mpsc, |frame| {
+        if let Some(tick) = frame.payload_as::<MarketTick>() {
+            println!("Tick: bid={:.2}, ask={:.2}", tick.bid, tick.ask);
+        }
+        0
+    })?;
+
+    let mut guard = loop {
+        match pool.claim(0) {
+            Ok(g) => break g,
+            Err(_) => std::thread::yield_now(),
+        }
+    };
+
+    let tick = MarketTick {
+        timestamp_ns: 1724140800000000000,
+        bid: 65000.10,
+        ask: 65000.20,
+        volume: 12.5,
+    };
+
+    // Direct binary write into slab buffer
+    guard.write_struct(&tick)?;
     guard.commit()?;
 
     Ok(())
@@ -117,35 +198,28 @@ fn main() -> Result<(), i32> {
 
 Measured on Apple Silicon (M-series, 1,000,000 messages, 32 workers):
 
-| Metric | C11 Native (`libawp`) | Rust FFI (`awp-rs`) | Zig 0.16 Native |
+| Metric | C11 Native (`libawp`) | Rust FFI (`awp-rs` v0.3.0) | Zig 0.16 Native |
 | :--- | :--- | :--- | :--- |
-| **Throughput** | **0.52 M msg/s** | **0.50 M msg/s** | **3.49 M msg/s** 🚀 |
-| **Median Latency (p50)** | **3,458 ns** (3.46 µs) | **3,480 ns** (3.48 µs) | **667 ns** (0.67 µs) |
-| **Mean Latency** | **2,109 ns** (2.11 µs) | **2,150 ns** (2.15 µs) | **286 ns** (0.29 µs) |
-| **Wall Time (1M Msgs)**| **1,936 ms** | **2,105 ms** | **286 ms** |
-
-*Note: Rust FFI overhead compared to native C11 is less than **2.5%**.*
+| **Throughput** | **0.52 M msg/s** | **0.53 M msg/s** | **3.49 M msg/s** 🚀 |
+| **Median Latency (p50)** | **3,458 ns** (3.46 µs) | **3,350 ns** (3.35 µs) | **667 ns** (0.67 µs) |
+| **Mean Latency** | **2,109 ns** (2.11 µs) | **1,870 ns** (1.87 µs) | **286 ns** (0.29 µs) |
+| **Wall Time (1M Msgs)**| **1,936 ms** | **1,870 ms** | **286 ms** |
 
 ---
 
-## FFI Architecture & Safety
+## Error Handling
 
-```
-+-------------------------------------------------------------+
-|                      Rust Application                       |
-|       (AsyncWorkerPool, ClaimGuard<'a>, FrameView<'a>)       |
-+-------------------------------------------------------------+
-                              |
-                     Rust FFI Trampoline
-                              |
-+-------------------------------------------------------------+
-|                     C Core (`libawp.a`)                     |
-|  - Zero-Copy Slabs (4KB page-aligned)                       |
-|  - Lock-Free Multi-Mode Atomic Rings (Vyukov / SPSC / MPSC) |
-|  - Contention-Free Worker Shards                            |
-+-------------------------------------------------------------+
-```
+`awp-rs` returns typed [`AwpError`](src/error.rs) variants:
 
-1. **Memory Safety**: `ClaimGuard` uses Rust lifetimes (`'a`) tied to the `AsyncWorkerPool` to prevent use-after-free.
-2. **Auto-Commit on Drop**: If a `ClaimGuard` is dropped before calling `.commit()`, it is automatically committed or recycled.
-3. **Thread Safety**: `AsyncWorkerPool` implements `Send` and `Sync`, allowing multi-threaded producers.
+```rust
+use awp_rs::AwpError;
+
+match pool.submit("feed", "symbol", payload, 0) {
+    Ok(()) => (),
+    Err(AwpError::InvalidArg) => eprintln!("Invalid configuration or arguments"),
+    Err(AwpError::TooBig) => eprintln!("Payload or feed exceeds maximum buffer limit"),
+    Err(AwpError::Deadlock) => eprintln!("Reentrancy detected: cannot submit inside worker callback"),
+    Err(AwpError::PoolClosed) => eprintln!("Pool is shutting down"),
+    Err(AwpError::Failed(code)) => eprintln!("System error code: {}", code),
+}
+```

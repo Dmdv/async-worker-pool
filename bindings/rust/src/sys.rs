@@ -6,6 +6,8 @@ pub const AWP_FEED_MAX: usize = 64;
 pub const AWP_SYMBOL_MAX: usize = 64;
 pub const AWP_PAYLOAD_MAX: usize = 4096;
 
+pub const AWP_FRAME_BROADCAST: u32 = 1 << 0;
+
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AwpRingMode {
@@ -36,16 +38,16 @@ pub struct AwpConfig {
     pub queue_capacity: u32,
     pub frame_pool_size: u32,
     pub ring_mode: AwpRingMode,
-    pub enable_supervisor: c_int,
-    pub max_restarts: u32,
-    pub restart_window_ms: u32,
-    pub worker_deadlock_ms: u32,
     pub shutdown_deadline_ms: u32,
+    pub supervisor_interval_ms: u32,
+    pub stall_threshold_ms: u32,
+    pub enable_supervisor: c_int,
+    pub enable_restart: c_int,
     pub process: Option<AwpProcessFn>,
     pub on_error: Option<AwpOnErrorFn>,
     pub user: *mut c_void,
+    pub n_broadcast_workers: u32,
     pub broadcast_feeds: *mut *const c_char,
-    pub n_broadcast_feeds: u32,
 }
 
 #[repr(C)]
