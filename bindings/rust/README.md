@@ -198,12 +198,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Measured on Apple Silicon (M-series, 1,000,000 messages, 32 workers):
 
-| Metric | C11 Native (`libawp`) | Rust FFI (`awp-rs` v0.3.0) | Zig 0.16 Native |
+| Metric | C11 Native (`libawp`) | Rust FFI (`awp-rs` v0.3.0) | Zig 0.16 Native (Phase 1) |
 | :--- | :--- | :--- | :--- |
-| **Throughput** | **0.52 M msg/s** | **0.53 M msg/s** | **3.49 M msg/s** 🚀 |
-| **Median Latency (p50)** | **3,458 ns** (3.46 µs) | **3,350 ns** (3.35 µs) | **667 ns** (0.67 µs) |
-| **Mean Latency** | **2,109 ns** (2.11 µs) | **1,870 ns** (1.87 µs) | **286 ns** (0.29 µs) |
-| **Wall Time (1M Msgs)**| **1,936 ms** | **1,870 ms** | **286 ms** |
+| **Throughput** | **0.52 M msg/s** | **0.53 M msg/s** | **5.38 M msg/s** 🚀 |
+| **Median Latency (p50)** | **3,458 ns** (3.46 µs) | **3,350 ns** (3.35 µs) | **< 100 ns** |
+| **p99 Tail Latency** | **1,110,000 ns** (1.11 ms) | **1,150,000 ns** (1.15 ms) | **1,000 ns** (1.00 µs) 🚀 |
+| **Mean Latency** | **2,109 ns** (2.11 µs) | **1,870 ns** (1.87 µs) | **547 ns** (0.55 µs) 🚀 |
 
 ---
 
