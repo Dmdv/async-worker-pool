@@ -49,7 +49,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 
 | Percentile | **Zig 0.16 Engine (Phase 1)** | **C11 Engine** (`async-worker-pool`) | Delta / Notes |
 | :--- | :--- | :--- | :--- |
-| **Min (Hardware Floor)** | **15 ns** (0.015 µs) | **83 ns** (0.083 µs) | Hardware DMA Floor |
+| **Min (Observed Floor)** | **15 ns** (0.015 µs) | **83 ns** (0.083 µs) | Observed Single-Hop Floor |
 | **p50 (Median)** | **< 100 ns** | **3.46 µs** (3,458 ns) | **Zig is > 30x lower latency** 🚀 |
 | **p90** | **1.00 µs** (1,000 ns) | **11.17 µs** (11,167 ns) | **Zig is 11.2x lower latency** 🚀 |
 | **p99 (Tail)** | **3.00 µs** (3,000 ns) | **1.11 ms** (1,110,000 ns) | **Zig is 370x lower tail jitter** 🚀 |

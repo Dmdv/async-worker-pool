@@ -41,7 +41,7 @@ Workload: **1,000,000 messages** processed asynchronously across worker threads 
 
 | Percentile | **Zig 0.16 Engine (Phase 1)** | **C11 Engine** (`async-worker-pool`) | Delta / Notes |
 | :--- | :--- | :--- | :--- |
-| **Min (Hardware Floor)** | **15 ns** (0.015 µs) | **120 ns** (0.120 µs) | Hardware DMA Floor |
+| **Min (Observed Floor)** | **15 ns** (0.015 µs) | **120 ns** (0.120 µs) | Observed Single-Hop Floor |
 | **p50 (Median)** | **< 100 ns** | **3.46 µs** (3,458 ns) | **Zig is > 30x lower latency** 🚀 |
 | **p90** | **1.00 µs** (1,000 ns) | **7.17 µs** (7,167 ns) | **Zig is 7.2x lower latency** 🚀 |
 | **p99 (Tail)** | **3.00 µs** (3,000 ns) | **379.92 µs** (379,920 ns) | **Zig is 126x lower tail jitter** 🚀 |
@@ -57,7 +57,22 @@ Workload: **1,000,000 messages** processed asynchronously across worker threads 
   <img src="images/benchmark_tail_latencies.png" width="96%" alt="Tail Latencies Distribution" />
 </p>
 
----
+### 1.1 Reproducing Cross-Language Benchmarks
+
+To reproduce and verify the captured benchmark dataset (`benchmarks/zig_phase1_calibrated.json`):
+
+```bash
+# 1. Run C engine dispatch benchmark
+make bench
+
+# 2. Run Zig 0.16 engine hardware dispatch benchmark
+cd ../async-worker-pool_zig
+zig build bench -Doptimize=ReleaseFast
+
+# 3. Regenerate charts with active venv
+cd ../async-worker-pool
+venv/bin/python scripts/generate_charts.py
+```
 
 ## 2. C Engine Evolution: Baseline vs Phase 1 (Hot-Path Lock-Free & Zero-Copy)
 
