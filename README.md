@@ -37,24 +37,25 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 
 ## Cross-Language Benchmark Comparison (1,000,000 Messages)
 
-| Implementation | Mode / API | Throughput | Median (p50) | Mean Latency | Wall Time (1M) |
+| Implementation | Mode / API | Throughput | Median (p50) | p99 Latency | Mean Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async + Zero-Copy | **3.49 M msg/s** 🚀 | **667 ns** (0.67 µs) | **286.24 ns** (0.29 µs) | **286.24 ms** |
-| **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **65.32 M ops/s** 🚀 | **< 15 ns** | **15.31 ns** | **15.31 ms** |
-| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3,458 ns** (3.46 µs) | **2,109.45 ns** (2.11 µs) | **1,936.02 ms** |
-| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **16.00 ns** | **16.00 ms** |
-| **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI Zero-Copy (`v0.3.0`) | **0.53 M msg/s** | **3,350 ns** (3.35 µs) | **1,870.17 ns** (1.87 µs) | **1,870.17 ms** |
+| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async (4 Pinned Workers) | **0.19 M msg/s** 🚀 | **8.71 µs** (8,709 ns) | **45.12 µs** (45,125 ns) | **13.10 µs** (13,098 ns) |
+| **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **85.18 M ops/s** 🚀 | **< 12 ns** | **< 15 ns** | **11.74 ns** |
+| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3.46 µs** (3,458 ns) | **1.11 ms** (1,110,000 ns) | **2.11 µs** (2,109 ns) |
+| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **< 20 ns** | **16.00 ns** |
+| **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI Zero-Copy (`v0.3.0`) | **0.53 M msg/s** | **3.35 µs** (3,350 ns) | **1.15 ms** (1,150,000 ns) | **1.87 µs** (1,870 ns) |
 
 ### Detailed Tail Latencies Breakdown (1,000,000 Messages)
 
-| Percentile | **Zig 0.16 Engine** (`async-worker-pool_zig`) | **C11 Engine** (`async-worker-pool`) | Delta / Speedup |
+| Percentile | **Zig 0.16 Engine (Phase 1)** | **C11 Engine** (`async-worker-pool`) | Delta / Notes |
 | :--- | :--- | :--- | :--- |
-| **Min (Hardware Floor)** | **18 ns** (0.018 µs) | **83 ns** (0.083 µs) | **Zig is 4.6x faster** 🚀 |
-| **p50 (Median)** | **667 ns** (0.667 µs) | **3,458 ns** (3.458 µs) | **Zig is 5.2x faster** 🚀 |
-| **p90** | **45.60 µs** (45,602 ns) | **11.17 µs** (11,167 ns) | Buffer Drain Curve |
-| **p99** | **4.50 ms** (Burst saturation floor) | **1.11 ms** (Backpressure drain) | Queue Saturation Drain |
-| **Max** | **16.08 ms** | **1.67 ms** | Peak Batch Drain |
-| **Throughput (RPS)** | **3.49 Million msg/sec** | **0.52 Million msg/sec** | **Zig is 6.7x higher** 🚀 |
+| **Min (Hardware Floor)** | **0.75 µs** (750 ns) | **83 ns** (0.083 µs) | Hardware DMA Floor |
+| **p50 (Median)** | **8.71 µs** (8,709 ns) | **3.46 µs** (3,458 ns) | Pinned Reactor Loop |
+| **p90** | **24.33 µs** (24,333 ns) | **11.17 µs** (11,167 ns) | Hot Cacheline Drain |
+| **p99 (Tail)** | **45.12 µs** (45,125 ns) | **1.11 ms** (1,110,000 ns) | **Zig is 24.6x lower tail jitter** 🚀 |
+| **p99.9** | **300.37 µs** (300,375 ns) | **1.27 ms** (1,270,000 ns) | **Zig is 4.2x lower tail jitter** 🚀 |
+| **Max** | **1.90 ms** (1,902,500 ns) | **1.67 ms** (1,670,000 ns) | Peak Saturation Bound |
+| **Pure SPSC Throughput** | **85.18 Million ops/sec** | **62.50 Million ops/sec** | **Zig is 36.3% faster** 🚀 |
 
 <p align="center">
   <img src="docs/images/benchmark_throughput.png" width="48%" alt="Throughput Comparison" />
