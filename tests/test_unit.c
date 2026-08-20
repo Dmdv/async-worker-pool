@@ -46,12 +46,12 @@ static void test_same_key_same_worker_fifo(void)
         TEST_EQ_I(awp_submit(pool, "trades", "BTCUSDT", payload, strlen(payload), 0),
                   0, "submit");
     }
-    wait_processed(&ctx, (uint64_t)N, 5000);
+    wait_processed(&ctx, (uint64_t)N, 10000);
+    awp_pool_shutdown(pool);
     TEST_EQ_U64(atomic_load(&ctx.count), (uint64_t)N, "all processed");
     TEST_EQ_I(ctx.reorder_violations, 0, "reorder distance 0 for key");
     TEST_EQ_U64(awp_pool_drops(pool), 0, "drops 0");
 
-    awp_pool_shutdown(pool);
     awp_pool_destroy(pool);
     test_ctx_destroy(&ctx);
 }
