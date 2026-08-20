@@ -40,11 +40,13 @@ static void test_fifo_mode(awp_ring_mode_t mode)
         TEST_EQ_I(awp_submit(pool, "trades", "BTCUSDT", p, strlen(p), 0), 0,
                   "submit");
     }
-    wait_processed(&ctx, (uint64_t)N, 8000);
+    wait_processed(&ctx, (uint64_t)N, 10000);
+    awp_pool_shutdown(pool);
+    TEST_EQ_U64(atomic_load(&ctx.count), (uint64_t)N, "all processed");
     if (mode == AWP_RING_SPSC || mode == AWP_RING_MPSC) {
         TEST_EQ_I(ctx.reorder_violations, 0, "reorder 0");
     }
-    awp_pool_shutdown(pool);
+    TEST_EQ_U64(awp_pool_drops(pool), 0, "drops 0");
     awp_pool_destroy(pool);
     test_ctx_destroy(&ctx);
 }
@@ -113,11 +115,10 @@ static void test_backpressure_mode(awp_ring_mode_t mode)
 
     expect = per * n_prod;
     wait_processed(&ctx, (uint64_t)expect, 15000);
+    awp_pool_shutdown(pool);
     TEST_EQ_I(atomic_load(&fails), 0, "no submit fails");
     TEST_EQ_U64(atomic_load(&ctx.count), (uint64_t)expect, "all delivered");
     TEST_EQ_U64(awp_pool_drops(pool), 0, "drops 0");
-
-    awp_pool_shutdown(pool);
     awp_pool_destroy(pool);
     test_ctx_destroy(&ctx);
 }
