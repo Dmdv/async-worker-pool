@@ -84,7 +84,11 @@ static inline int test_process(const awp_frame_t *frame, void *user)
 
     int val = -1;
     if (frame->payload_len > 0 && frame->payload[0] >= '0' && frame->payload[0] <= '9') {
-        val = atoi((const char *)frame->payload);
+        char pbuf[32];
+        size_t plen = frame->payload_len < sizeof(pbuf) - 1 ? frame->payload_len : sizeof(pbuf) - 1;
+        memcpy(pbuf, frame->payload, plen);
+        pbuf[plen] = '\0';
+        val = atoi(pbuf);
     }
 
     snprintf(key, sizeof(key), "%s|%s", frame->feed, frame->symbol);

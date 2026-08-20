@@ -194,22 +194,28 @@ check-all: check-func check-bench
 SAN_CFLAGS  := -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer
 SAN_LDFLAGS := -fsanitize=address,undefined
 
+ifeq ($(UNAME_S),Darwin)
+  DETECT_LEAKS := 0
+else
+  DETECT_LEAKS := 1
+endif
+
 check-sanitize:
 	$(MAKE) clean
 	$(MAKE) EXTRA_CFLAGS="$(SAN_CFLAGS)" EXTRA_LDFLAGS="$(SAN_LDFLAGS)" \
 		tests
-	@echo "=== LSan ON (clean functional subset) ==="
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+	@echo "=== Sanitizer Clean Suite (ASan+UBSan) ==="
+	ASAN_OPTIONS=detect_leaks=$(DETECT_LEAKS):halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_UNIT)
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+	ASAN_OPTIONS=detect_leaks=$(DETECT_LEAKS):halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_UNIT_MODES) all
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+	ASAN_OPTIONS=detect_leaks=$(DETECT_LEAKS):halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_RING)
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+	ASAN_OPTIONS=detect_leaks=$(DETECT_LEAKS):halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_E2E)
-	ASAN_OPTIONS=detect_leaks=1:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
+	ASAN_OPTIONS=detect_leaks=$(DETECT_LEAKS):halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_E2E_MODES) all
-	@echo "=== LSan OFF (quarantine / intentional-leak paths) ==="
+	@echo "=== Sanitizer Quarantine / Intentional-Leak Paths ==="
 	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
 		$(TEST_SUP)
 	ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 UBSAN_OPTIONS=halt_on_error=1 \
