@@ -21,7 +21,7 @@ static void test_fifo_mode(awp_ring_mode_t mode)
     test_ctx_init(&ctx);
     awp_config_init(&cfg);
     cfg.n_workers = 8;
-    cfg.queue_capacity = 64;
+    cfg.queue_capacity = 256;
     cfg.frame_pool_size = 512;
     cfg.ring_mode = mode;
     cfg.enable_supervisor = 0;
