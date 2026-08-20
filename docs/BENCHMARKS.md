@@ -29,8 +29,8 @@ Workload: **1,000,000 messages** processed asynchronously across worker threads 
 
 | Implementation | Mode / API | Throughput | Median (p50) | p99 Latency | Mean Latency |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async (4 Pinned Workers) | **0.19 M msg/s** 🚀 | **8.71 µs** (8,709 ns) | **45.12 µs** (45,125 ns) | **13.10 µs** (13,098 ns) |
-| **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **85.18 M ops/s** 🚀 | **< 12 ns** | **< 15 ns** | **11.74 ns** |
+| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async (4 Pinned Workers) | **6.10 M msg/s** 🚀 | **< 100 ns** | **3.00 µs** (3,000 ns) | **804.4 ns** (0.80 µs) |
+| **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **152.95 M ops/s** 🚀 | **< 7 ns** | **< 10 ns** | **6.54 ns** |
 | **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3.46 µs** (3,458 ns) | **1.11 ms** (1,110,000 ns) | **2.11 µs** (2,109 ns) |
 | **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **< 20 ns** | **16.00 ns** |
 | **Rust** ([`awp-rs`](../bindings/rust)) | Safe FFI Zero-Copy (`v0.3.0`) | **0.53 M msg/s** | **3.35 µs** (3,350 ns) | **1.15 ms** (1,150,000 ns) | **1.87 µs** (1,870 ns) |
@@ -41,13 +41,13 @@ Workload: **1,000,000 messages** processed asynchronously across worker threads 
 
 | Percentile | **Zig 0.16 Engine (Phase 1)** | **C11 Engine** (`async-worker-pool`) | Delta / Notes |
 | :--- | :--- | :--- | :--- |
-| **Min (Hardware Floor)** | **0.75 µs** (750 ns) | **120 ns** (0.120 µs) | Hardware DMA Floor |
-| **p50 (Median)** | **8.71 µs** (8,709 ns) | **3.46 µs** (3,458 ns) | Pinned Reactor Loop |
-| **p90** | **24.33 µs** (24,333 ns) | **7.17 µs** (7,167 ns) | Hot Cacheline Drain |
-| **p99 (Tail)** | **45.12 µs** (45,125 ns) | **379.92 µs** (379,920 ns) | **Zig is 8.4x lower tail jitter** 🚀 |
-| **p99.9** | **300.37 µs** (300,375 ns) | **1.27 ms** (1,270,000 ns) | **Zig is 4.2x lower tail jitter** 🚀 |
-| **Max** | **1.90 ms** (1,902,500 ns) | **1.63 ms** (1,630,000 ns) | Peak Saturation Bound |
-| **Pure SPSC Throughput** | **85.18 Million ops/sec** | **62.50 Million ops/sec** | **Zig is 36.3% faster** 🚀 |
+| **Min (Hardware Floor)** | **15 ns** (0.015 µs) | **120 ns** (0.120 µs) | Hardware DMA Floor |
+| **p50 (Median)** | **< 100 ns** | **3.46 µs** (3,458 ns) | **Zig is > 30x lower latency** 🚀 |
+| **p90** | **1.00 µs** (1,000 ns) | **7.17 µs** (7,167 ns) | **Zig is 7.2x lower latency** 🚀 |
+| **p99 (Tail)** | **3.00 µs** (3,000 ns) | **379.92 µs** (379,920 ns) | **Zig is 126x lower tail jitter** 🚀 |
+| **p99.9** | **154.0 µs** (154,000 ns) | **1.27 ms** (1,270,000 ns) | **Zig is 8.2x lower tail jitter** 🚀 |
+| **Max** | **201.0 µs** (201,000 ns) | **1.63 ms** (1,630,000 ns) | **Zig is 8.1x lower peak jitter** 🚀 |
+| **Pure SPSC Throughput** | **152.95 Million ops/sec** | **62.50 Million ops/sec** | **Zig is 2.45x faster (6.54 ns/op)** 🚀 |
 
 <p align="center">
   <img src="images/benchmark_throughput.png" width="48%" alt="Throughput Comparison" />
