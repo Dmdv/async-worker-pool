@@ -90,11 +90,12 @@ static inline int test_process(const awp_frame_t *frame, void *user)
     snprintf(key, sizeof(key), "%s|%s", frame->feed, frame->symbol);
     pthread_mutex_lock(&c->order_mu);
     if (strcmp(c->last_key, key) == 0) {
-        if (val >= 0 && c->last_seq_for_key > 0) {
-            if ((uint64_t)val < c->last_seq_for_key)
+        if (val >= 0) {
+            if ((int)val < (int)c->last_seq_for_key)
                 c->reorder_violations++;
-        } else if (frame->seq < c->last_seq_for_key) {
-            c->reorder_violations++;
+        } else {
+            if (frame->seq < c->last_seq_for_key)
+                c->reorder_violations++;
         }
     }
     strncpy(c->last_key, key, sizeof(c->last_key) - 1);
