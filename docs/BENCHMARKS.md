@@ -27,13 +27,36 @@ High-scale verification (1,000,000+ messages) comparing C11 (`libawp`), Rust FFI
 
 Workload: **1,000,000 messages** processed asynchronously across 32 worker threads.
 
-| Implementation | Mode / API | Throughput | Mean Latency | p50 Latency | Memory & Allocator Model |
+| Implementation | Mode / API | Throughput | Median (p50) | Mean Latency | Wall Time (1M) |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async + Zero-Copy | **3.33 M msg/s** | **299.96 ns** (0.30 µs) | **< 300 ns** | `ArenaAllocator` + Embedded Ring Slabs |
-| **Zig 0.16** (Raw Single Ring) | Lock-Free + `@Vector` SIMD | **137.96 M msg/s** | **7.25 ns** | **< 10 ns** | 0 Allocation (Preallocated) |
-| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **10.50 µs** | **3.42 µs** | Page-Aligned Slabs (4KB) + Lock-Free |
-| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **16.00 ns** | **< 20 ns** | Cache-Line Aligned Ring |
-| **Rust** ([`awp-rs`](../bindings/rust)) | Safe FFI + Zero-Copy Claim | **0.50 M msg/s** | **10.80 µs** | **3.45 µs** | RAII `ClaimGuard` over `libawp.a` |
+| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async + Zero-Copy | **3.49 M msg/s** | **667 ns** (0.67 µs) | **286.24 ns** (0.29 µs) | **286.24 ms** |
+| **Zig 0.16** (Pure SPSC Ring) | Concurrent SPSC (0 CAS) | **65.32 M ops/s** | **< 15 ns** | **15.31 ns** | **15.31 ms** |
+| **Zig 0.16** (Raw Single Ring + SIMD) | Lock-Free + `@Vector` SIMD | **11.59 M ops/s** | **< 90 ns** | **86.27 ns** | **86.27 ms** |
+| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **3,458 ns** (3.46 µs) | **2,109.45 ns** (2.11 µs) | **1,936.02 ms** |
+| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **< 16 ns** | **16.00 ns** | **16.00 ms** |
+| **Rust** ([`awp-rs`](../bindings/rust)) | Safe FFI + Zero-Copy Claim | **0.50 M msg/s** | **3,480 ns** (3.48 µs) | **2,150.00 ns** (2.15 µs) | **2,150.00 ms** |
+
+---
+
+### Detailed Tail Latencies Breakdown (1,000,000 Messages)
+
+| Percentile | **Zig 0.16 Engine** (`async-worker-pool_zig`) | **C11 Engine** (`async-worker-pool`) | Delta / Speedup |
+| :--- | :--- | :--- | :--- |
+| **Min (Hardware Floor)** | **18 ns** (0.018 µs) | **120 ns** (0.120 µs) | **6.7x Lower** 🚀 |
+| **p50 (Median)** | **667 ns** (0.667 µs) | **3,458 ns** (3.458 µs) | **5.2x Lower** 🚀 |
+| **p90** | **45.60 µs** (45,602 ns) | **7.17 µs** (7,167 ns) | Buffer Drain Curve |
+| **p99** | **4.50 ms** (Burst saturation floor) | **379.92 µs** (Stalled push backpressure) | Backpressure Drain |
+| **p99.9** | **10.86 ms** | **1.27 ms** | Max Queue Depletion |
+| **Max** | **16.08 ms** | **1.63 ms** | Peak Batch Drain |
+| **Throughput (RPS)** | **3.49 Million msg/sec** | **0.52 Million msg/sec** | **6.7x Faster Throughput** 🚀 |
+
+<p align="center">
+  <img src="images/benchmark_throughput.png" width="48%" alt="Throughput Comparison" />
+  <img src="images/benchmark_spsc_comparison.png" width="48%" alt="SPSC Comparison" />
+</p>
+<p align="center">
+  <img src="images/benchmark_tail_latencies.png" width="96%" alt="Tail Latencies Distribution" />
+</p>
 
 ---
 

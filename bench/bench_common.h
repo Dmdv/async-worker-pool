@@ -106,6 +106,7 @@ static inline int bench_cmp_u64(const void *a, const void *b)
 }
 
 typedef struct {
+    double min_ns;
     double p50_ns;
     double p90_ns;
     double p99_ns;
@@ -129,6 +130,7 @@ static inline bench_percentiles_t bench_calc_percentiles(uint64_t *samples, size
         sum += samples[i];
     p.mean_ns = (double)sum / (double)count;
 
+    p.min_ns   = (double)samples[0];
     p.p50_ns   = (double)samples[count * 50 / 100];
     p.p90_ns   = (double)samples[count * 90 / 100];
     p.p99_ns   = (double)samples[count * 99 / 100];
