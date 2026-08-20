@@ -11,3 +11,6 @@ awp.pc
 
 # Local historical review dumps (not published in the repo)
 docs/archive/reviews/
+target/
+bindings/rust/target/
+
