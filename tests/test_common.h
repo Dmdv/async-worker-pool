@@ -82,14 +82,23 @@ static inline int test_process(const awp_frame_t *frame, void *user)
         return 42;
     }
 
+    int val = -1;
+    if (frame->payload_len > 0 && frame->payload[0] >= '0' && frame->payload[0] <= '9') {
+        val = atoi((const char *)frame->payload);
+    }
+
     snprintf(key, sizeof(key), "%s|%s", frame->feed, frame->symbol);
     pthread_mutex_lock(&c->order_mu);
     if (strcmp(c->last_key, key) == 0) {
-        if (frame->seq < c->last_seq_for_key)
+        if (val >= 0 && c->last_seq_for_key > 0) {
+            if ((uint64_t)val < c->last_seq_for_key)
+                c->reorder_violations++;
+        } else if (frame->seq < c->last_seq_for_key) {
             c->reorder_violations++;
+        }
     }
     strncpy(c->last_key, key, sizeof(c->last_key) - 1);
-    c->last_seq_for_key = frame->seq;
+    c->last_seq_for_key = (val >= 0) ? (uint64_t)val : frame->seq;
     pthread_mutex_unlock(&c->order_mu);
 
     atomic_fetch_add(&c->count, 1);
