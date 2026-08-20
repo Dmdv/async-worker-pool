@@ -177,6 +177,49 @@ int awp_submit(awp_pool_t *pool,
                uint32_t flags);
 
 /**
+ * Fast-path submission using pre-calculated 64-bit shard hash key.
+ * Bypasses string strlen() and hashing in the hot path.
+ */
+int awp_submit_keyed(awp_pool_t *pool,
+                     uint64_t hash_key,
+                     const char *feed,
+                     const char *symbol,
+                     const void *payload,
+                     size_t payload_len,
+                     uint32_t flags);
+
+/**
+ * Handle for two-phase Zero-Copy Claim / Commit.
+ */
+typedef struct awp_claim {
+    awp_frame_t *frame;
+    uint32_t     shard;
+    size_t       pos;
+    void        *reserved;
+} awp_claim_t;
+
+/**
+ * Claim an enqueue slot directly in the target shard's queue.
+ * The returned claim contains a frame pointer where the caller can write
+ * payload data directly in-place without any intermediate copies.
+ *
+ * @param pool      Pool handle
+ * @param shard     Target shard (from awp_shard_of or awp_hash_key % n_workers)
+ * @param out_claim Claim token to populate
+ * @return 0 on success, -EAGAIN if full/busy, negative errno on error.
+ */
+int awp_claim_frame(awp_pool_t *pool, uint32_t shard, awp_claim_t *out_claim);
+
+/**
+ * Commit a previously claimed frame, making it visible to the worker thread.
+ *
+ * @param pool  Pool handle
+ * @param claim Claim token returned by awp_claim_frame
+ * @return 0 on success.
+ */
+int awp_commit_frame(awp_pool_t *pool, const awp_claim_t *claim);
+
+/**
  * Stable FNV-1a shard for (feed, symbol) under the pool's worker map.
  * Exposed for tests.
  */

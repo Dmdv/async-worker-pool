@@ -1,0 +1,13 @@
+[package]
+name = "awp-rs"
+version = "0.2.0"
+edition = "2021"
+authors = ["Dima <dima@hft.internal>"]
+description = "Industrial Ultra-Low Latency Async Worker Pool with Zero-Copy Claim/Commit API (Rust FFI bindings for libawp)"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+
+[dev-dependencies]
+
+[build-dependencies]

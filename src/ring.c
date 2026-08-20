@@ -17,24 +17,39 @@ void awp_ring_wake_all(awp_ring_t *r)
     pthread_mutex_unlock(&r->wait_mu);
 }
 
+void awp_ring_wake_if_needed(awp_ring_t *r)
+{
+    if (!r)
+        return;
+    if (atomic_load_explicit(&r->waiters, memory_order_acquire) > 0) {
+        pthread_mutex_lock(&r->wait_mu);
+        pthread_cond_broadcast(&r->wait_cv);
+        pthread_mutex_unlock(&r->wait_mu);
+    }
+}
+
 void awp_ring_wait_space(awp_ring_t *r)
 {
+    atomic_fetch_add_explicit(&r->waiters, 1, memory_order_release);
     pthread_mutex_lock(&r->wait_mu);
     while (!atomic_load_explicit(&r->closed, memory_order_acquire) &&
            awp_ring_depth(r) >= (uint32_t)r->capacity) {
         pthread_cond_wait(&r->wait_cv, &r->wait_mu);
     }
     pthread_mutex_unlock(&r->wait_mu);
+    atomic_fetch_sub_explicit(&r->waiters, 1, memory_order_release);
 }
 
 void awp_ring_wait_data(awp_ring_t *r)
 {
+    atomic_fetch_add_explicit(&r->waiters, 1, memory_order_release);
     pthread_mutex_lock(&r->wait_mu);
     while (!atomic_load_explicit(&r->closed, memory_order_acquire) &&
            awp_ring_depth(r) == 0) {
         pthread_cond_wait(&r->wait_cv, &r->wait_mu);
     }
     pthread_mutex_unlock(&r->wait_mu);
+    atomic_fetch_sub_explicit(&r->waiters, 1, memory_order_release);
 }
 
 static int ring_alloc_cells(awp_ring_t *r, uint32_t capacity)
@@ -57,15 +72,30 @@ static int ring_alloc_cells(awp_ring_t *r, uint32_t capacity)
         memset(r->cells, 0, bytes);
     }
 
+    void *fmem = NULL;
+    size_t fbytes = (size_t)cap * sizeof(awp_frame_t);
+    if (posix_memalign(&fmem, 4096, fbytes) != 0 || !fmem) {
+        r->frames = calloc(cap, sizeof(awp_frame_t));
+        if (!r->frames) {
+            free(r->cells);
+            r->cells = NULL;
+            return -ENOMEM;
+        }
+    } else {
+        r->frames = (awp_frame_t *)fmem;
+        memset(r->frames, 0, fbytes);
+    }
+
     r->capacity = cap;
     r->mask = cap - 1;
     atomic_store_explicit(&r->enqueue_pos, 0, memory_order_relaxed);
     atomic_store_explicit(&r->dequeue_pos, 0, memory_order_relaxed);
     atomic_store_explicit(&r->closed, 0, memory_order_relaxed);
+    atomic_store_explicit(&r->waiters, 0, memory_order_relaxed);
 
     for (i = 0; i < cap; i++) {
         atomic_store_explicit(&r->cells[i].sequence, i, memory_order_relaxed);
-        r->cells[i].data = NULL;
+        r->cells[i].data = &r->frames[i];
     }
     return 0;
 }
@@ -98,6 +128,8 @@ void awp_ring_destroy(awp_ring_t *r)
 {
     if (!r)
         return;
+    free(r->frames);
+    r->frames = NULL;
     free(r->cells);
     r->cells = NULL;
     pthread_cond_destroy(&r->wait_cv);
@@ -147,7 +179,7 @@ static int push_sp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
             cell->data = frame;
             atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
             atomic_store_explicit(&r->enqueue_pos, pos + 1, memory_order_relaxed);
-            awp_ring_wake_all(r);
+            awp_ring_wake_if_needed(r);
             if (blocked_ns_out)
                 *blocked_ns_out = did_block ? (awp_now_ns() - t0) : 0;
             return 0;
@@ -199,7 +231,7 @@ static int push_mp(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out)
                 cell->data = frame;
                 atomic_store_explicit(&cell->sequence, pos + 1,
                                       memory_order_release);
-                awp_ring_wake_all(r);
+                awp_ring_wake_if_needed(r);
                 if (blocked_ns_out)
                     *blocked_ns_out = did_block ? (awp_now_ns() - t0) : 0;
                 return 0;
@@ -256,7 +288,7 @@ static int try_push_sp(awp_ring_t *r, awp_frame_t *frame)
         cell->data = frame;
         atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
         atomic_store_explicit(&r->enqueue_pos, pos + 1, memory_order_relaxed);
-        awp_ring_wake_all(r);
+        awp_ring_wake_if_needed(r);
         return 0;
     }
     if (dif < 0)
@@ -283,7 +315,7 @@ static int try_push_mp(awp_ring_t *r, awp_frame_t *frame)
                 memory_order_acq_rel, memory_order_relaxed)) {
             cell->data = frame;
             atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
-            awp_ring_wake_all(r);
+            awp_ring_wake_if_needed(r);
             return 0;
         }
         return -EAGAIN; /* lost race; caller may retry */
@@ -330,7 +362,7 @@ static int pop_sc(awp_ring_t *r, awp_frame_t **out)
             cell->data = NULL;
             atomic_store_explicit(&cell->sequence, pos + r->capacity,
                                   memory_order_release);
-            awp_ring_wake_all(r);
+            awp_ring_wake_if_needed(r);
             return 0;
         }
         if (dif < 0) {
@@ -376,7 +408,7 @@ static int pop_mc(awp_ring_t *r, awp_frame_t **out)
                 cell->data = NULL;
                 atomic_store_explicit(&cell->sequence, pos + r->capacity,
                                       memory_order_release);
-                awp_ring_wake_all(r);
+                awp_ring_wake_if_needed(r);
                 return 0;
             }
             continue;

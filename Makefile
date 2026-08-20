@@ -44,10 +44,12 @@ OBJ_HOOKS := $(patsubst src/%.c,build/hooks/%.o,$(SRC))
 LIB_HOOKS := build/libawp_hooks.a
 
 # --- benches ---
-BENCH_DISPATCH  := build/bench_dispatch
-BENCH_ALL_MODES := build/bench_all_modes
-BENCH_RING      := build/bench_ring
-BENCH_OPENLOOP  := build/bench_openloop
+BENCH_DISPATCH   := build/bench_dispatch
+BENCH_ALL_MODES  := build/bench_all_modes
+BENCH_RING       := build/bench_ring
+BENCH_OPENLOOP   := build/bench_openloop
+BENCH_CONTENTION := build/bench_contention
+BENCH_ZEROCOPY   := build/bench_zerocopy
 
 # --- examples ---
 EX_SIMPLE := build/simple_publish
@@ -112,16 +114,22 @@ $(TEST_RESTART_FAIL): tests/test_restart_create_fail.c $(LIB_HOOKS)
 
 # benches
 $(BENCH_DISPATCH): bench/bench_dispatch.c $(LIB)
-	$(CC) $(CFLAGS) $< -L. -lawp $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) -Ibench $< -L. -lawp $(LDFLAGS) -o $@
 
 $(BENCH_ALL_MODES): bench/bench_all_modes.c $(LIB)
-	$(CC) $(CFLAGS) $< -L. -lawp $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) -Ibench $< -L. -lawp $(LDFLAGS) -o $@
 
 $(BENCH_RING): bench/bench_ring.c $(LIB)
-	$(CC) $(CFLAGS) -Isrc $< -L. -lawp $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) -Isrc -Ibench $< -L. -lawp $(LDFLAGS) -o $@
 
 $(BENCH_OPENLOOP): bench/bench_openloop.c $(LIB)
-	$(CC) $(CFLAGS) $< -L. -lawp $(LDFLAGS) -o $@
+	$(CC) $(CFLAGS) -Ibench $< -L. -lawp $(LDFLAGS) -o $@
+
+$(BENCH_CONTENTION): bench/bench_contention.c $(LIB)
+	$(CC) $(CFLAGS) -Ibench $< -L. -lawp $(LDFLAGS) -o $@
+
+$(BENCH_ZEROCOPY): bench/bench_zerocopy.c $(LIB)
+	$(CC) $(CFLAGS) -Ibench $< -L. -lawp $(LDFLAGS) -o $@
 
 # examples
 $(EX_SIMPLE): examples/simple_publish.c $(LIB)
@@ -141,7 +149,7 @@ $(EX_MPMC): examples/example_mpmc.c $(LIB)
 
 tests: dirs $(TEST_UNIT) $(TEST_UNIT_MODES) $(TEST_SUP) $(TEST_E2E) \
 	$(TEST_E2E_MODES) $(TEST_E2E_LIFE) $(TEST_RING) $(TEST_TEARDOWN) $(TEST_RESTART_FAIL)
-bench: dirs $(BENCH_DISPATCH) $(BENCH_ALL_MODES) $(BENCH_RING) $(BENCH_OPENLOOP)
+bench: dirs $(BENCH_DISPATCH) $(BENCH_ALL_MODES) $(BENCH_RING) $(BENCH_OPENLOOP) $(BENCH_CONTENTION) $(BENCH_ZEROCOPY)
 examples: dirs $(EX_SIMPLE) $(EX_SPSC) $(EX_MPSC) $(EX_SPMC) $(EX_MPMC)
 e2e: $(TEST_E2E) $(TEST_E2E_MODES)
 

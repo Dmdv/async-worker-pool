@@ -99,6 +99,7 @@ awp_frame_t *awp_frame_pool_acquire(awp_frame_pool_t *p)
             if (spin++ < AWP_SPIN_BUDGET) {
                 awp_cpu_relax();
             } else {
+                atomic_fetch_add_explicit(&p->waiters, 1, memory_order_release);
                 pthread_mutex_lock(&p->wait_mu);
                 while (!atomic_load_explicit(&p->closed, memory_order_acquire)) {
                     uint64_t h2 = atomic_load_explicit(&p->head, memory_order_acquire);
@@ -109,6 +110,7 @@ awp_frame_t *awp_frame_pool_acquire(awp_frame_pool_t *p)
                     pthread_cond_wait(&p->wait_cv, &p->wait_mu);
                 }
                 pthread_mutex_unlock(&p->wait_mu);
+                atomic_fetch_sub_explicit(&p->waiters, 1, memory_order_release);
                 spin = 0;
             }
             continue;
@@ -154,9 +156,11 @@ void awp_frame_pool_release(awp_frame_pool_t *p, awp_frame_t *f)
         if (atomic_compare_exchange_weak_explicit(
                 &p->head, &head, neu,
                 memory_order_acq_rel, memory_order_relaxed)) {
-            pthread_mutex_lock(&p->wait_mu);
-            pthread_cond_signal(&p->wait_cv);
-            pthread_mutex_unlock(&p->wait_mu);
+            if (atomic_load_explicit(&p->waiters, memory_order_acquire) > 0) {
+                pthread_mutex_lock(&p->wait_mu);
+                pthread_cond_signal(&p->wait_cv);
+                pthread_mutex_unlock(&p->wait_mu);
+            }
             return;
         }
         if (spin++ > AWP_SPIN_BUDGET)

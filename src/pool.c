@@ -280,6 +280,143 @@ fail_mu:
     return rc;
 }
 
+int awp_claim_frame(awp_pool_t *pool, uint32_t shard, awp_claim_t *out_claim)
+{
+    if (!pool || !out_claim)
+        return -EINVAL;
+    if (awp_tls_in_callback)
+        return -EDEADLK;
+
+    awp_api_enter(pool);
+
+    if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
+        atomic_load(&pool->quarantined) ||
+        atomic_load(&pool->destroy_started)) {
+        awp_api_leave(pool);
+        return -EINVAL;
+    }
+
+    if (shard >= pool->cfg.n_workers)
+        shard = shard % pool->cfg.n_workers;
+
+    awp_ring_t *r = &pool->workers[shard].queue;
+    if (atomic_load_explicit(&r->closed, memory_order_acquire)) {
+        awp_api_leave(pool);
+        return -1;
+    }
+
+    size_t pos = atomic_load_explicit(&r->enqueue_pos, memory_order_relaxed);
+    awp_cell_t *cell = &r->cells[pos & r->mask];
+    size_t seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
+    intptr_t dif = (intptr_t)seq - (intptr_t)pos;
+
+    if (dif == 0) {
+        if (atomic_compare_exchange_weak_explicit(
+                &r->enqueue_pos, &pos, pos + 1,
+                memory_order_acq_rel, memory_order_relaxed)) {
+            atomic_fetch_add(&pool->active_submits, 1);
+            awp_frame_t *f = &r->frames[pos & r->mask];
+            f->shard = shard;
+            f->submit_ns = awp_now_ns();
+            out_claim->frame = f;
+            out_claim->shard = shard;
+            out_claim->pos = pos;
+            out_claim->reserved = cell;
+            return 0;
+        }
+        awp_api_leave(pool);
+        return -EAGAIN;
+    }
+    awp_api_leave(pool);
+    return -EAGAIN;
+}
+
+int awp_commit_frame(awp_pool_t *pool, const awp_claim_t *claim)
+{
+    if (!pool || !claim || !claim->frame)
+        return -EINVAL;
+
+    uint32_t shard = claim->shard;
+    if (shard >= pool->cfg.n_workers)
+        return -EINVAL;
+
+    awp_ring_t *r = &pool->workers[shard].queue;
+    size_t pos = claim->pos;
+    awp_cell_t *cell = (awp_cell_t *)claim->reserved;
+    if (!cell)
+        cell = &r->cells[pos & r->mask];
+
+    cell->data = claim->frame;
+    atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
+    awp_ring_wake_if_needed(r);
+
+    atomic_fetch_add(&pool->submitted, 1);
+    atomic_fetch_sub(&pool->active_submits, 1);
+    awp_api_leave(pool);
+    return 0;
+}
+
+int awp_submit_keyed(awp_pool_t *pool,
+                     uint64_t hash_key,
+                     const char *feed,
+                     const char *symbol,
+                     const void *payload,
+                     size_t payload_len,
+                     uint32_t flags)
+{
+    uint32_t shard;
+    if (!pool)
+        return -EINVAL;
+
+    if (pool->n_shard_workers == 0)
+        shard = 0;
+    else
+        shard = pool->shard_base + (uint32_t)(hash_key % (uint64_t)pool->n_shard_workers);
+
+    awp_claim_t claim;
+    int rc;
+    unsigned spin = 0;
+
+    for (;;) {
+        rc = awp_claim_frame(pool, shard, &claim);
+        if (rc == 0) {
+            awp_frame_t *f = claim.frame;
+            if (feed) {
+                size_t flen = strlen(feed);
+                if (flen > AWP_FEED_MAX) flen = AWP_FEED_MAX;
+                memcpy(f->feed, feed, flen);
+                f->feed[flen] = '\0';
+            }
+            if (symbol) {
+                size_t slen = strlen(symbol);
+                if (slen > AWP_SYMBOL_MAX) slen = AWP_SYMBOL_MAX;
+                memcpy(f->symbol, symbol, slen);
+                f->symbol[slen] = '\0';
+            }
+            if (payload && payload_len > 0) {
+                size_t plen = payload_len > AWP_PAYLOAD_MAX ? AWP_PAYLOAD_MAX : payload_len;
+                memcpy(f->payload, payload, plen);
+                f->payload_len = plen;
+            } else {
+                f->payload_len = 0;
+            }
+            f->flags = flags;
+            f->seq = atomic_fetch_add(&pool->seq, 1);
+
+            return awp_commit_frame(pool, &claim);
+        }
+        if (rc == -1)
+            return -1;
+
+        if (spin++ < 64)
+            awp_cpu_relax();
+        else {
+            awp_ring_wait_space(&pool->workers[shard].queue);
+            spin = 0;
+        }
+    }
+}
+
 int awp_submit(awp_pool_t *pool,
                const char *feed,
                const char *symbol,
@@ -291,7 +428,6 @@ int awp_submit(awp_pool_t *pool,
     uint32_t shard;
     uint64_t blocked_acc = 0;
     uint64_t submit_ns;
-    int rc;
     size_t flen, slen;
     unsigned spin = 0;
 
@@ -336,6 +472,7 @@ int awp_submit(awp_pool_t *pool,
         shard = shard % pool->cfg.n_workers;
 
     submit_ns = awp_now_ns(); /* retain across retries for honest latency */
+    awp_ring_t *r = &pool->workers[shard].queue;
 
     for (;;) {
         if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
@@ -346,64 +483,62 @@ int awp_submit(awp_pool_t *pool,
             return -EINVAL;
         }
 
-        f = awp_frame_pool_acquire(&pool->frames);
-        if (!f) {
-            atomic_fetch_sub(&pool->active_submits, 1);
-            awp_api_leave(pool);
-            return -1;
-        }
-        /* Acquire can block; recheck terminal states before holding a frame. */
-        if (atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING ||
-            atomic_load(&pool->quarantined) ||
-            atomic_load(&pool->destroy_started)) {
-            awp_frame_pool_release(&pool->frames, f);
-            atomic_fetch_sub(&pool->active_submits, 1);
-            awp_api_leave(pool);
-            return -EINVAL;
-        }
-
-        memcpy(f->feed, feed, flen);
-        f->feed[flen] = '\0';
-        memcpy(f->symbol, symbol, slen);
-        f->symbol[slen] = '\0';
-        if (payload_len > 0)
-            memcpy(f->payload, payload, payload_len);
-        f->payload_len = payload_len;
-        f->flags = flags;
-        f->seq = atomic_fetch_add(&pool->seq, 1);
-        f->submit_ns = submit_ns;
-        f->shard = shard;
-
-        rc = awp_ring_try_push(&pool->workers[shard].queue, f);
-        if (rc == 0)
-            break;
-
-        awp_frame_pool_release(&pool->frames, f);
-
-        if (rc == -1 || atomic_load(&pool->workers[shard].queue.closed) ||
-            atomic_load(&pool->lifecycle) != AWP_LIFE_RUNNING) {
+        if (atomic_load_explicit(&r->closed, memory_order_acquire)) {
             atomic_fetch_add(&pool->dropped, 1);
             atomic_fetch_sub(&pool->active_submits, 1);
             awp_api_leave(pool);
             return -1;
         }
 
-        if (spin++ < 64)
-            awp_cpu_relax();
-        else {
-            uint64_t t0 = awp_now_ns();
-            /* Count block entry before park so observers can detect parking. */
-            atomic_fetch_add(&pool->workers[shard].enqueue_blocks, 1);
-            awp_ring_wait_space(&pool->workers[shard].queue);
-            blocked_acc += awp_now_ns() - t0;
-            spin = 0;
+        size_t pos = atomic_load_explicit(&r->enqueue_pos, memory_order_relaxed);
+        awp_cell_t *cell = &r->cells[pos & r->mask];
+        size_t seq = atomic_load_explicit(&cell->sequence, memory_order_acquire);
+        intptr_t dif = (intptr_t)seq - (intptr_t)pos;
+
+        if (dif == 0) {
+            if (atomic_compare_exchange_weak_explicit(
+                    &r->enqueue_pos, &pos, pos + 1,
+                    memory_order_acq_rel, memory_order_relaxed)) {
+                f = &r->frames[pos & r->mask];
+                memcpy(f->feed, feed, flen);
+                f->feed[flen] = '\0';
+                memcpy(f->symbol, symbol, slen);
+                f->symbol[slen] = '\0';
+                if (payload_len > 0)
+                    memcpy(f->payload, payload, payload_len);
+                f->payload_len = payload_len;
+                f->flags = flags;
+                f->seq = atomic_fetch_add(&pool->seq, 1);
+                f->submit_ns = submit_ns;
+                f->shard = shard;
+
+                cell->data = f;
+                atomic_store_explicit(&cell->sequence, pos + 1, memory_order_release);
+                awp_ring_wake_if_needed(r);
+                break;
+            }
+            continue;
         }
+
+        if (dif < 0) {
+            if (spin++ < 64)
+                awp_cpu_relax();
+            else {
+                uint64_t t0 = awp_now_ns();
+                atomic_fetch_add(&pool->workers[shard].enqueue_blocks, 1);
+                awp_ring_wait_space(r);
+                blocked_acc += awp_now_ns() - t0;
+                spin = 0;
+            }
+            continue;
+        }
+        awp_cpu_relax();
     }
 
     if (blocked_acc > 0)
         atomic_fetch_add(&pool->workers[shard].blocked_ns, blocked_acc);
     {
-        uint32_t depth = awp_ring_depth(&pool->workers[shard].queue);
+        uint32_t depth = awp_ring_depth(r);
         uint64_t hwm = atomic_load(&pool->workers[shard].queue_hwm);
         while (depth > hwm &&
                !atomic_compare_exchange_weak(&pool->workers[shard].queue_hwm,

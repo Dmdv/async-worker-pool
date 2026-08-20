@@ -7,14 +7,31 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 ## Features
 
 - **N fixed workers** created once (never per message)
-- **Producer-side shard**: FNV-1a(`feed || 0x1F || symbol`) → worker index
+- **Producer-side shard**: FNV-1a(`feed || 0x1F || symbol`) → worker index or fast 64-bit keyed submission (`awp_submit_keyed`)
 - **Bounded atomic rings** — **SPSC / MPSC / SPMC / MPMC** (`ring_mode`), sequence protocol, spin/yield backpressure, **never drop**
-- **Preallocated frame pool** (lock-free freelist where supported; 32-bit ABA tag; **64-bit hosts**) — no `malloc`/`free` on the hot path
+- **Zero-Copy Claim & Commit API** (`awp_claim_frame` / `awp_commit_frame`) for in-place writing directly into ring slabs with zero `memcpy`
+- **Page-Aligned Ring Slabs (4KB)** — zero heap allocation / zero CAS lock contention on the hot path
 - **Dedicated broadcast workers** for mark-price / funding-style feeds
 - **Soft fault isolation**: `process()` errors recycle the frame and continue
 - **Supervisor**: restarts dead/stalled workers; per-worker metrics
 - **Bounded shutdown wait** then **quarantine** stuck callbacks (no cancel/detach)
-- **Runtime helper**: `awp_runtime_enabled()` / `AWP_ENABLED` (caller-owned; create is not gated)
+- **Rust FFI Bindings**: Safe RAII wrapper and Zero-Copy crate in [`bindings/rust/`](bindings/rust)
+- **Zig 0.16 Parallel Project**: Native SIMD `@Vector` implementation with `ArenaAllocator` in [`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)
+
+## Cross-Language Benchmark Comparison (1,000,000 Messages)
+
+| Implementation | Mode / API | Throughput | Mean Latency | Memory & Allocator Model |
+| :--- | :--- | :--- | :--- | :--- |
+| **Zig 0.16** ([`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)) | Multi-Threaded Async + Zero-Copy | **3.33 M msg/s** | **299.96 ns** (0.30 µs) | `ArenaAllocator` + Embedded Ring Slabs |
+| **Zig 0.16** (Raw Single Ring) | Lock-Free + `@Vector` SIMD | **137.96 M msg/s** | **7.25 ns** | Zero-Allocation Preallocated Slabs |
+| **C11** ([`async-worker-pool`](https://github.com/Dmdv/async-worker-pool)) | Zero-Copy Claim/Commit | **0.52 M msg/s** | **10.50 µs** | Page-Aligned Slabs (4KB) + Lock-Free |
+| **C11** (Raw SPSC Ring) | Lock-Free Push/Pop | **62.50 M ops/s** | **16.00 ns** | Cache-Line Aligned Ring |
+| **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI + Zero-Copy Claim | **0.50 M msg/s** | **10.80 µs** | RAII `ClaimGuard` over `libawp.a` |
+
+Full benchmark reports and architecture evolution reasoning:
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
+- [`docs/EVOLUTION_PLAN.md`](docs/EVOLUTION_PLAN.md)
+- [`docs/ARCHITECTURE_REASONING.md`](docs/ARCHITECTURE_REASONING.md)
 
 ## Lifetime contract (read this before production use)
 

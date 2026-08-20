@@ -1,27 +1,21 @@
 /**
- * Raw ring micro-benchmark for SPSC/MPSC/SPMC/MPMC (no pool overhead).
- *
- * Usage: bench_ring [ops] [spsc|mpsc|spmc|mpmc|all]
+ * Raw Ring Micro-benchmark for SPSC/MPSC/SPMC/MPMC
+ * Measures pure lock-free ring operations without pool scheduling overhead.
  */
 #include "awp/awp.h"
 #include "../src/internal.h"
+#include "bench_common.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
 #include <stdatomic.h>
-#include <time.h>
 #include <sched.h>
 
-static awp_frame_t g_slab[1]; /* dummy payload pointer target */
+#define DEFAULT_OPS 1000000
 
-static uint64_t now_ns(void)
-{
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-}
+static awp_frame_t g_slab[1];
 
 static const char *mode_name(awp_ring_mode_t m)
 {
@@ -43,9 +37,9 @@ typedef struct {
 
 static void *prod(void *arg)
 {
-    thr_t *a = arg;
-    int i;
-    for (i = 0; i < a->n; i++) {
+    thr_t *a = (thr_t *)arg;
+    bench_pin_pcores();
+    for (int i = 0; i < a->n; i++) {
         if (awp_ring_push(a->r, g_slab, NULL) != 0)
             atomic_fetch_add(a->errs, 1);
     }
@@ -54,7 +48,8 @@ static void *prod(void *arg)
 
 static void *cons(void *arg)
 {
-    thr_t *a = arg;
+    thr_t *a = (thr_t *)arg;
+    bench_pin_pcores();
     int got = 0;
     while (got < a->n) {
         awp_frame_t *f = NULL;
@@ -83,12 +78,12 @@ static void run_mode(awp_ring_mode_t mode, int ops)
     atomic_init(&done, 0);
     atomic_init(&errs, 0);
 
-    if (awp_ring_init(&ring, 1024, mode) != 0) {
+    if (awp_ring_init(&ring, 4096, mode) != 0) {
         printf("%-6s INIT_FAIL\n", mode_name(mode));
         return;
     }
 
-    t0 = now_ns();
+    t0 = bench_now_ns();
     for (i = 0; i < n_cons; i++) {
         ca[i].r = &ring;
         ca[i].n = (i == n_cons - 1) ? (ops - per_c * (n_cons - 1)) : per_c;
@@ -106,31 +101,31 @@ static void run_mode(awp_ring_mode_t mode, int ops)
     for (i = 0; i < n_prod; i++)
         pthread_join(pt[i], NULL);
 
-    {
-        int spins = 0;
-        while (atomic_load(&done) < ops && spins < 500000) {
-            spins++;
-            sched_yield();
-        }
+    int spins = 0;
+    while (atomic_load(&done) < ops && spins < 1000000) {
+        spins++;
+        awp_cpu_relax();
     }
     awp_ring_close(&ring);
     for (i = 0; i < n_cons; i++)
         pthread_join(ct[i], NULL);
-    t1 = now_ns();
+    t1 = bench_now_ns();
 
-    printf("%-6s prods=%d cons=%d ops=%d thr=%.0f msg/s errs=%d consumed=%d %s\n",
+    double duration_sec = (double)(t1 - t0) / 1e9;
+    double throughput = (double)ops / duration_sec;
+    double ns_per_op = (double)(t1 - t0) / (double)ops;
+
+    printf("%-6s  prods=%d  cons=%d  ops=%7d  |  Throughput: %6.2f M msg/s  |  Latency: %5.1f ns/op  |  %s\n",
            mode_name(mode), n_prod, n_cons, ops,
-           (double)ops / ((double)(t1 - t0) / 1e9),
-           atomic_load(&errs), atomic_load(&done),
-           (atomic_load(&errs) == 0 && atomic_load(&done) == ops) ? "PASS"
-                                                                   : "FAIL");
+           throughput / 1e6, ns_per_op,
+           (atomic_load(&errs) == 0 && atomic_load(&done) == ops) ? "PASS" : "FAIL");
 
     awp_ring_destroy(&ring);
 }
 
 int main(int argc, char **argv)
 {
-    int ops = 100000;
+    int ops = DEFAULT_OPS;
     awp_ring_mode_t modes[] = {
         AWP_RING_SPSC, AWP_RING_MPSC, AWP_RING_SPMC, AWP_RING_MPMC
     };
@@ -142,7 +137,11 @@ int main(int argc, char **argv)
     if (argc > 2)
         sel = argv[2];
 
-    printf("bench_ring ops=%d\n", ops);
+    bench_pin_pcores();
+
+    printf("\n=== Raw Ring Micro-benchmark (Lock-Free Push/Pop) ===\n");
+    printf("Total Operations: %d\n\n", ops);
+
     for (i = 0; i < 4; i++) {
         if (strcmp(sel, "all") != 0) {
             const char *want = mode_name(modes[i]);
@@ -156,5 +155,6 @@ int main(int argc, char **argv)
         }
         run_mode(modes[i], ops);
     }
+    printf("\n");
     return 0;
 }

@@ -43,18 +43,29 @@ typedef enum awp_wstate {
     AWP_W_QUARANTINED /* stuck in callback; must not free pool memory */
 } awp_wstate_t;
 
+#if defined(__APPLE__)
+#include <mach/mach_time.h>
+#endif
+
 /* ---- time / backoff ----------------------------------------------------- */
 
-/** Monotonic ns when available; REALTIME only if CLOCK_MONOTONIC is absent. */
+/** Monotonic ns when available; Mach timebase on Darwin. */
 static inline uint64_t awp_now_ns(void)
 {
+#if defined(__APPLE__)
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0)
+        mach_timebase_info(&tb);
+    return mach_absolute_time() * tb.numer / tb.denom;
+#elif defined(CLOCK_MONOTONIC)
     struct timespec ts;
-#if defined(CLOCK_MONOTONIC)
     clock_gettime(CLOCK_MONOTONIC, &ts);
-#else
-    clock_gettime(CLOCK_REALTIME, &ts); /* exotic / non-POSIX fallback */
-#endif
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts); /* exotic / non-POSIX fallback */
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+#endif
 }
 
 static inline void awp_cpu_relax(void)
@@ -87,7 +98,7 @@ static inline uint32_t awp_round_up_pow2(uint32_t v)
 /* ---- bounded ring: SPSC | MPSC | SPMC | MPMC ---------------------------- */
 
 typedef struct awp_cell {
-    AWP_ALIGN_CACHE atomic_size_t sequence;
+    atomic_size_t sequence;
     awp_frame_t *data;
 } awp_cell_t;
 
@@ -95,10 +106,12 @@ typedef struct awp_ring {
     AWP_ALIGN_CACHE atomic_size_t enqueue_pos;
     AWP_ALIGN_CACHE atomic_size_t dequeue_pos;
     awp_cell_t *cells;
+    awp_frame_t *frames;
     size_t capacity;
     size_t mask;
     awp_ring_mode_t mode;
     atomic_int closed;
+    atomic_int waiters; /* Count of threads parked on wait_cv */
     /* Hybrid park (not on data path CAS): after spin budget, wait here. */
     pthread_mutex_t wait_mu;
     pthread_cond_t wait_cv;
@@ -112,6 +125,7 @@ void awp_ring_reopen(awp_ring_t *r);
 void awp_ring_wait_space(awp_ring_t *r);
 void awp_ring_wait_data(awp_ring_t *r);
 void awp_ring_wake_all(awp_ring_t *r);
+void awp_ring_wake_if_needed(awp_ring_t *r);
 
 int awp_ring_push(awp_ring_t *r, awp_frame_t *frame, uint64_t *blocked_ns_out);
 /** Non-blocking push: 0 ok, -1 closed/invalid, -EAGAIN full. */
@@ -128,6 +142,7 @@ typedef struct awp_frame_pool {
     uint32_t size;
     atomic_int closed;
     atomic_int lock_free_ok; /* 1 if 64-bit head is lock-free */
+    atomic_int waiters;      /* Count of threads parked on wait_cv */
     pthread_mutex_t wait_mu;
     pthread_cond_t wait_cv;
 } awp_frame_pool_t;

@@ -11,6 +11,10 @@ void *awp_worker_main(void *arg)
     awp_worker_t *w = (awp_worker_t *)arg;
     awp_pool_t *pool = w->pool;
 
+#if defined(__APPLE__)
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
+
     /* Never cancel inside process(); only cooperative stop between frames. */
     pthread_setcancelstate(PTHREAD_CANCEL_DISABLE, NULL);
 
@@ -59,7 +63,10 @@ void *awp_worker_main(void *arg)
 
         atomic_fetch_add(&w->processed, 1);
         atomic_store(&w->last_progress_ns, awp_now_ns());
-        awp_frame_pool_release(&pool->frames, frame);
+
+        if (!w->queue.frames || frame < w->queue.frames || frame >= w->queue.frames + w->queue.capacity) {
+            awp_frame_pool_release(&pool->frames, frame);
+        }
     }
 
     atomic_store(&w->state, AWP_W_EXITED);
