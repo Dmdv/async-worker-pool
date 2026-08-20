@@ -4,6 +4,25 @@ This document outlines the systematic engineering roadmap to evolve `async-worke
 
 ---
 
+## Table of Contents
+
+- [Phase 1: Hot-Path Lock-Free & Syscall Elimination](#phase-1-hot-path-lock-free--syscall-elimination-target-sub-microsecond-p99)
+  - [1.1 Remove Condvar Signals from Enqueue/Dequeue Hot Path](#11-remove-condvar-signals-from-enqueuedequeue-hot-path)
+  - [1.2 Eliminate Over-Alignment in Ring Cells](#12-eliminate-over-alignment-in-ring-cells)
+  - [1.3 Zero-Copy Claim & Commit API](#13-zero-copy-claim--commit-api)
+- [Phase 2: Hardware, Memory & OS Optimization](#phase-2-hardware-memory--os-optimization)
+  - [2.1 P-Core Pinning & Cache Cluster Affinity](#21-p-core-pinning--cache-cluster-affinity)
+  - [2.2 HugePages & Slab Allocation](#22-hugepages--slab-allocation)
+  - [2.3 Cycle-Accurate Nanosecond Profiling (RDTSC / Mach Timebase)](#23-cycle-accurate-nanosecond-profiling-rdtsc--mach-timebase)
+- [Phase 3: Industrial Safety, Load-Shedding & Tooling](#phase-3-industrial-safety-load-shedding--tooling)
+  - [3.1 Configurable Backpressure Policies](#31-configurable-backpressure-policies)
+  - [3.2 Verification & Sanitizer Suite](#32-verification--sanitizer-suite)
+- [Phase 4: Cross-Language Integration & Parallel Zig Engine](#phase-4-cross-language-integration--parallel-zig-engine)
+  - [4.1 C ABI Stability & Packaging](#41-c-abi-stability--packaging)
+  - [4.2 Parallel Zig Engine (`async-worker-pool_zig`)](#42-parallel-zig-engine-async-worker-pool_zig)
+
+---
+
 ## Phase 1: Hot-Path Lock-Free & Syscall Elimination (Target: Sub-microsecond P99)
 
 ### 1.1 Remove Condvar Signals from Enqueue/Dequeue Hot Path

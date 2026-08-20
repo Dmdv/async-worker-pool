@@ -1,5 +1,23 @@
 # Design: Sharded low-latency async worker pool (C)
 
+---
+
+## Table of Contents
+
+- [Goal](#goal)
+- [Lifecycle Contract](#lifecycle-contract-current-head)
+- [Why not N = cores?](#why-not-n--cores)
+- [Module Layout](#module-layout)
+- [Queue Choice — All Concurrency Models](#queue-choice--all-concurrency-models)
+- [Frame Lifecycle](#frame-lifecycle)
+- [Sharding](#sharding)
+- [Fault Isolation](#fault-isolation)
+- [Bounded Shutdown](#bounded-shutdown-wait-budget-then-quarantine)
+- [Observability](#observability)
+- [Verification Matrix](#verification-matrix)
+
+---
+
 ## Goal
 
 Preallocated, sharded dispatch stage for market-data frames:

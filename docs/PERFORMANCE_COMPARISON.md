@@ -11,6 +11,25 @@ publicly reported ranges for market tools.
 | Host (published benches) | Darwin arm64 · Apple M3 Ultra |
 | Intent | Reference for product positioning / integration choices |
 
+---
+
+## Table of Contents
+
+- [What AWP is (and is not)](#what-awp-is-and-is-not)
+- [AWP Numbers (Local)](#awp-numbers-local)
+  - [Caveats](#caveats-always-restate-when-quoting)
+- [Market Landscape (by Category)](#market-landscape-by-category)
+  - [1. Pure Queues](#1-pure-queues-not-a-full-pool)
+  - [2. General Thread Pools / Executors](#2-general-thread-pools--executors)
+  - [3. Market-Data / Trading-Oriented Systems](#3-market-data--trading-oriented-systems)
+- [Side-by-Side Comparison](#side-by-side-conceptual)
+- [Where AWP is Strong](#where-awp-is-strong-performance-relevant)
+- [Where Market Solutions are Stronger](#where-market-solutions-are-stronger)
+- [Bottom Line](#bottom-line)
+- [Related Docs](#related-docs)
+
+---
+
 ## What AWP is (and is not)
 
 AWP is a **sharded permanent-worker dispatch stage** for market-data frames:

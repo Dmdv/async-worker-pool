@@ -4,6 +4,35 @@ This document provides a deep, definitive architectural reference on the memory 
 
 ---
 
+## Table of Contents
+
+- [1. Hardware Context & Latency Hierarchy](#1-hardware-context--latency-hierarchy)
+- [2. Why `malloc` / `free` is Prohibited on the Hot Path](#2-why-malloc--free-is-prohibited-on-the-hot-path)
+  - [2.1 Non-Deterministic Free-List Traversal Jitter](#21-non-deterministic-free-list-traversal-jitter)
+  - [2.2 Metadata Overhead & Cache Line Pollution](#22-metadata-overhead--cache-line-pollution)
+  - [2.3 Heap Fragmentation & Working Set Degradation](#23-heap-fragmentation--working-set-degradation)
+  - [2.4 Deallocation Cost on Object Graphs ($O(N)$ Pointer Chasing)](#24-deallocation-cost-on-object-graphs-on-pointer-chasing)
+  - [2.5 Multi-Threaded Contention & Arena Locks](#25-multi-threaded-contention--arena-locks)
+- [3. Linux-Specific Low-Latency Memory & OS Architecture](#3-linux-specific-low-latency-memory--os-architecture)
+  - [3.1 Linux HugePages (2MB / 1GB) vs 4KB Standard Pages](#31-linux-hugepages-2mb--1gb-vs-4kb-standard-pages)
+  - [3.2 Linux NUMA Architecture & Node-Local Memory Policy](#32-linux-numa-architecture--node-local-memory-policy)
+  - [3.3 Linux Core Isolation & Tickless Kernel Tuning](#33-linux-core-isolation--tickless-kernel-tuning)
+  - [3.4 Linux Fast Synchronization: Futex & FUTEX_WAIT_PRIVATE vs Hybrid Spin](#34-linux-fast-synchronization-futex--futex_wait_private-vs-hybrid-spin)
+- [4. 4KB Page-Aligned Slabs + Lock-Free Rings (C Architecture)](#4-4kb-page-aligned-slabs--lock-free-rings-c-architecture)
+- [5. `ArenaAllocator` + Embedded Ring Slabs (Zig & C Architecture)](#5-arenaallocator--embedded-ring-slabs-zig--c-architecture)
+  - [5.1 Bump-Pointer Mechanics](#51-bump-pointer-mechanics)
+  - [5.2 $O(1)$ Bulk Teardown](#52-o1-bulk-teardown)
+  - [5.3 $O(1)$ Reset with Capacity Retention (`reset(.retain_capacity)`)](#53-o1-reset-with-capacity-retention-resetretain_capacity)
+- [6. Lock-Free Vyukov Cache-Aligned Ring](#6-lock-free-vyukov-cache-aligned-ring)
+  - [6.1 False Sharing Elimination (64-byte Cache-Line Padding)](#61-false-sharing-elimination-64-byte-cache-line-padding)
+  - [6.2 Spatial Packing of Ring Cells](#62-spatial-packing-of-ring-cells)
+- [7. Rust Safe RAII `ClaimGuard` & Zero-Copy In-Place Semantics](#7-rust-safe-raii-claimguard--zero-copy-in-place-semantics)
+  - [7.1 Two-Phase Claim & Commit Pattern](#71-two-phase-claim--commit-pattern)
+  - [7.2 Safe RAII Drop Semantics](#72-safe-raii-drop-semantics)
+- [8. Comparative Memory Architecture Matrix](#8-comparative-memory-architecture-matrix)
+
+---
+
 ## 1. Hardware Context & Latency Hierarchy
 
 To achieve deterministic sub-microsecond latency ($< 300\text{ ns}$ mean, sub-microsecond $p99$), software must be mechanically sympathetic to modern CPU microarchitecture and OS memory subsystems:

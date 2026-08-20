@@ -2,6 +2,19 @@
 
 Rendered PNGs live in [`diagrams/`](diagrams/). Mermaid sources below also render on GitHub.
 
+---
+
+## Table of Contents
+
+- [1. Pool Architecture](#1-pool-architecture)
+- [2. Submit → Process Path](#2-submit--process-path)
+- [3. Lifecycle State Machine](#3-lifecycle-state-machine)
+- [4. Ring Concurrency Modes](#4-ring-concurrency-modes)
+- [5. Supervisor Restart](#5-supervisor-restart)
+- [Related Docs](#related-docs)
+
+---
+
 ## 1. Pool architecture
 
 ![Pool architecture](diagrams/01-architecture.png)

@@ -4,6 +4,21 @@ This document details the complete technical reasoning, multi-agent audit findin
 
 ---
 
+## Table of Contents
+
+- [1. Multi-Agent Audit Summary](#1-multi-agent-audit-summary)
+  - [1.1 Concurrency & Hot-Path Latency (Architect Findings)](#11-concurrency--hot-path-latency-architect-findings)
+  - [1.2 Industrial Safety & Hardening (Safety Engineer Findings)](#12-industrial-safety--hardening-safety-engineer-findings)
+- [2. Strategic Language Evaluation: C vs Zig vs Rust in Low-Latency & HFT](#2-strategic-language-evaluation-c-vs-zig-vs-rust-in-low-latency--hft)
+  - [2.1 Zig (Modern Low-Level Powerhouse)](#21-zig-modern-low-level-powerhouse)
+  - [2.2 C11 (The Universal ABI & Substrate)](#22-c11-the-universal-abi--substrate)
+  - [2.3 Rust (Type-Safe Strategy Layer)](#23-rust-type-safe-strategy-layer)
+- [3. Benchmark Gap Analysis & Methodology](#3-benchmark-gap-analysis--methodology)
+  - [3.1 Gaps in Legacy Benchmarks](#31-gaps-in-legacy-benchmarks)
+  - [3.2 Upgraded Benchmark Suite](#32-upgraded-benchmark-suite)
+
+---
+
 ## 1. Multi-Agent Audit Summary
 
 ### 1.1 Concurrency & Hot-Path Latency (Architect Findings)

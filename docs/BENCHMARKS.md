@@ -13,6 +13,16 @@ High-scale verification (1,000,000+ messages) comparing C11 (`libawp`), Rust FFI
 
 ---
 
+## Table of Contents
+
+- [1. Cross-Language Comparative Summary (1,000,000 Messages)](#1-cross-language-comparative-summary-1000000-messages)
+- [2. C Engine Evolution: Baseline vs Phase 1 (Hot-Path Lock-Free & Zero-Copy)](#2-c-engine-evolution-baseline-vs-phase-1-hot-path-lock-free--zero-copy)
+  - [2.1 Raw Lock-Free Rings (1,000,000 Operations)](#21-raw-lock-free-rings-1000000-operations)
+  - [2.2 Pool Dispatch Benchmarks](#22-pool-dispatch-benchmarks)
+- [3. Key Architectural Findings](#3-key-architectural-findings)
+
+---
+
 ## 1. Cross-Language Comparative Summary (1,000,000 Messages)
 
 Workload: **1,000,000 messages** processed asynchronously across 32 worker threads.

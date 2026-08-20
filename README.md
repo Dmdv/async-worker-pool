@@ -18,6 +18,22 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 - **Rust FFI Bindings**: Safe RAII wrapper and Zero-Copy crate in [`bindings/rust/`](bindings/rust)
 - **Zig 0.16 Parallel Project**: Native SIMD `@Vector` implementation with `ArenaAllocator` in [`async-worker-pool_zig`](https://github.com/Dmdv/async-worker-pool_zig)
 
+---
+
+## Table of Contents
+
+- [Features](#features)
+- [Cross-Language Benchmark Comparison](#cross-language-benchmark-comparison-1000000-messages)
+- [Lifetime Contract](#lifetime-contract-read-this-before-production-use)
+- [Quick Start](#quick-start)
+- [Project Layout](#layout)
+- [Design Notes](#design-notes-short)
+- [Documentation Index](#documentation)
+- [Build, Test, Install](#build-test-install)
+- [License](#license)
+
+---
+
 ## Cross-Language Benchmark Comparison (1,000,000 Messages)
 
 | Implementation | Mode / API | Throughput | Mean Latency | Memory & Allocator Model |

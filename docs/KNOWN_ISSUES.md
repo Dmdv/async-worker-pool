@@ -12,6 +12,16 @@ Live tracker: [Dmdv/async-worker-pool issues](https://github.com/Dmdv/async-work
 | AWP-NIT-02 | S3 diagnostics | Join-helper setup failures logged generically | [#2](https://github.com/Dmdv/async-worker-pool/issues/2) |
 | AWP-NIT-03 | S3 coverage | No fault injection for `setdetachstate` failure | [#3](https://github.com/Dmdv/async-worker-pool/issues/3) |
 
+---
+
+## Table of Contents
+
+- [AWP-NIT-01 — Clock Wording Precision](#awp-nit-01--clock-wording-precision)
+- [AWP-NIT-02 — Join Helper Diagnostics](#awp-nit-02--join-helper-diagnostics)
+- [AWP-NIT-03 — setdetachstate Fault Injection](#awp-nit-03--setdetachstate-fault-injection)
+
+---
+
 ## AWP-NIT-01 — Clock wording precision
 
 **Issue:** [#1](https://github.com/Dmdv/async-worker-pool/issues/1)
