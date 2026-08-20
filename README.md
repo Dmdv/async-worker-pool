@@ -26,6 +26,7 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 - [Cross-Language Benchmark Comparison](#cross-language-benchmark-comparison-1000000-messages)
 - [Lifetime Contract](#lifetime-contract-read-this-before-production-use)
 - [Quick Start](#quick-start)
+- [Rust FFI Bindings (awp-rs)](#rust-ffi-bindings-awp-rs)
 - [Project Layout](#layout)
 - [Design Notes](#design-notes-short)
 - [Documentation Index](#documentation)
@@ -130,6 +131,51 @@ int main(void) {
 ```
 
 See `examples/simple_publish.c` for multi-reader usage.
+
+---
+
+## Rust FFI Bindings (`awp-rs`)
+
+A memory-safe, idiomatic Rust crate with **Zero-Copy Claim & Commit API** and RAII lifecycle is provided in [`bindings/rust/`](bindings/rust/README.md):
+
+```bash
+cd bindings/rust
+cargo test                                       # Run Rust tests
+cargo run --release --example bench_throughput   # Benchmark 1,000,000 messages
+```
+
+### Rust Example (Zero-Copy In-Place Dispatch)
+
+```rust
+use awp_rs::{AsyncWorkerPool, AwpRingMode};
+
+fn main() -> Result<(), i32> {
+    // Initialize pool with 16 workers and a thread-safe callback
+    let pool = AsyncWorkerPool::new(16, 2048, AwpRingMode::Mpsc, |frame| {
+        let data = frame.payload();
+        // Process message in-place without heap allocations
+        0
+    })?;
+
+    // Zero-Copy Claim: allocate slot directly in ring slab
+    let mut guard = loop {
+        match pool.claim(0) {
+            Ok(g) => break g,
+            Err(_) => std::thread::yield_now(),
+        }
+    };
+
+    // In-place serialization with 0 memcpy overhead
+    let buf = guard.payload_mut();
+    buf[..32].fill(0x7F);
+    guard.set_payload_len(32);
+    guard.commit()?;
+
+    Ok(())
+}
+```
+
+---
 
 ## Layout
 

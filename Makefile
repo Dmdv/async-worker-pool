@@ -245,6 +245,16 @@ uninstall:
 	rm -f $(DESTDIR)$(PREFIX)/lib/pkgconfig/awp.pc
 	rm -rf $(DESTDIR)$(PREFIX)/share/doc/awp
 
+check-rust: lib
+	@echo "--- Running Rust FFI Tests (awp-rs) ---"
+	cd bindings/rust && cargo test
+
+bench-rust: lib
+	@echo "--- Running Rust FFI Benchmark (1M Messages) ---"
+	cd bindings/rust && cargo run --release --example bench_throughput
+
 clean:
 	rm -f $(OBJ) $(LIB) awp.pc
 	rm -rf build
+	cd bindings/rust && cargo clean 2>/dev/null || true
+
