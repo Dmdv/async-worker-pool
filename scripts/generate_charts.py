@@ -22,7 +22,7 @@ fig.patch.set_facecolor('#0d1117')
 ax.set_facecolor('#161b22')
 
 categories = ['Zig 0.16 Engine\n(Phase 1 Prefaulted)', 'C11 libawp\n(Zero-Copy)', 'Rust awp-rs\n(v0.3.0 FFI)']
-throughputs = [6.10, 0.52, 0.53]
+throughputs = [5.38, 0.52, 0.53]
 colors = ['#F7A41D', '#007ACC', '#DEA584']
 
 bars = ax.bar(categories, throughputs, color=colors, width=0.42, edgecolor='#30363d', linewidth=1.5, zorder=3)
@@ -30,18 +30,18 @@ bars = ax.bar(categories, throughputs, color=colors, width=0.42, edgecolor='#303
 for idx, bar in enumerate(bars):
     yval = bar.get_height()
     if idx == 0:
-        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.20, 
-                f"{yval:.2f} M msg/s\n(11.7x FASTER)", 
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.18, 
+                f"{yval:.2f} M msg/s\n(10.3x FASTER)", 
                 ha='center', va='bottom', fontsize=12, fontweight='bold', color='#F7A41D')
     else:
-        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.20, 
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.18, 
                 f"{yval:.2f} M msg/s", 
                 ha='center', va='bottom', fontsize=11, fontweight='bold', color='#8b949e')
 
 ax.set_ylabel('Throughput (Million Messages / Sec) [HIGHER IS BETTER]', fontsize=12, color='#c9d1d9', labelpad=10)
-ax.set_title('Multi-Threaded Async Pool: Throughput Comparison (1M Messages)\nZig 0.16 is 11.7x Faster than C11 Engine', 
+ax.set_title('Multi-Threaded Async Pool: Throughput Comparison (1M Messages)\nZig 0.16 is 10.3x Faster than C11 Engine', 
              fontsize=14, fontweight='bold', color='#f0f6fc', pad=18)
-ax.set_ylim(0, 7.8)
+ax.set_ylim(0, 7.0)
 ax.grid(axis='y', linestyle='--', alpha=0.25, color='#8b949e', zorder=0)
 ax.tick_params(colors='#8b949e', labelsize=11)
 for spine in ax.spines.values():
@@ -60,7 +60,7 @@ fig.patch.set_facecolor('#0d1117')
 ax.set_facecolor('#161b22')
 
 spsc_categories = ['Zig 0.16 SpscRing\n(0 CAS, Pure Pointer)', 'C11 SPSC Ring\n(Lock-Free Vyukov)', 'Zig Single-Ring\n(+ SIMD Stream)']
-spsc_ops = [152.95, 62.50, 11.91]
+spsc_ops = [171.76, 62.50, 11.95]
 spsc_colors = ['#238636', '#2f81f7', '#a371f7']
 
 bars = ax.bar(spsc_categories, spsc_ops, color=spsc_colors, width=0.42, edgecolor='#30363d', linewidth=1.5, zorder=3)
@@ -68,18 +68,18 @@ bars = ax.bar(spsc_categories, spsc_ops, color=spsc_colors, width=0.42, edgecolo
 for idx, bar in enumerate(bars):
     yval = bar.get_height()
     if idx == 0:
-        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 3.5, 
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 4.0, 
                 f"{yval:.2f} M ops/s\n({(1000.0/yval):.2f} ns/op) [WINNER]", 
                 ha='center', va='bottom', fontsize=11, fontweight='bold', color='#3fb950')
     else:
-        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 3.5, 
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 4.0, 
                 f"{yval:.2f} M ops/s\n({(1000.0/yval):.2f} ns/op)", 
                 ha='center', va='bottom', fontsize=11, fontweight='bold', color='#c9d1d9')
 
 ax.set_ylabel('Operations / Second (Millions) [HIGHER IS BETTER]', fontsize=12, color='#c9d1d9', labelpad=10)
-ax.set_title('Pure Single-Ring Lock-Free Performance (1,000,000 Ops)\nZig SpscRing reaches 152.95M ops/s (6.54 ns/op) — 2.45x Faster than C11', 
+ax.set_title('Pure Single-Ring Lock-Free Performance (1,000,000 Ops)\nZig SpscRing reaches 171.76M ops/s (5.82 ns/op) — 2.75x Faster than C11', 
              fontsize=14, fontweight='bold', color='#f0f6fc', pad=18)
-ax.set_ylim(0, 185)
+ax.set_ylim(0, 205)
 ax.grid(axis='y', linestyle='--', alpha=0.25, color='#8b949e', zorder=0)
 ax.tick_params(colors='#8b949e', labelsize=11)
 for spine in ax.spines.values():
@@ -98,28 +98,28 @@ fig.patch.set_facecolor('#0d1117')
 ax.set_facecolor('#161b22')
 
 percentiles = ['Min (Floor)', 'p50 (Median)', 'p90', 'p99 (Tail Jitter)', 'p99.9', 'Max']
-zig_latencies = [15, 100, 1000, 3000, 154000, 201000]
+zig_latencies = [15, 100, 1000, 1000, 96000, 128000]
 c_latencies = [83, 3458, 11167, 1109791, 1270000, 1671458]
 
 x = np.arange(len(percentiles))
 
-ax.plot(x, zig_latencies, marker='o', markersize=10, linewidth=3.0, color='#F7A41D', label='Zig 0.16 Engine (Phase 1 Hardware Hardening)', zorder=4)
+ax.plot(x, zig_latencies, marker='o', markersize=10, linewidth=3.0, color='#F7A41D', label='Zig 0.16 Engine (Phase 1 Final)', zorder=4)
 ax.plot(x, c_latencies, marker='s', markersize=10, linewidth=3.0, color='#58a6ff', label='C11 Engine (libawp Zero-Copy)', zorder=4)
 
 ax.set_yscale('log')
 ax.set_xticks(x)
 ax.set_xticklabels(percentiles, fontsize=11, color='#f0f6fc')
 ax.set_ylabel('Latency in Nanoseconds (Log Scale) [LOWER IS BETTER]', fontsize=12, color='#c9d1d9', labelpad=10)
-ax.set_title('End-to-End Tail Latency Distribution: Zig vs C11 (1M Messages)\n[ Zig achieves 3.0 µs p99 Tail Jitter vs 1.11 ms in C11 — 370x Lower Jitter ]', 
+ax.set_title('End-to-End Tail Latency Distribution: Zig vs C11 (1M Messages)\n[ Zig achieves 1.0 µs p99 Tail Jitter vs 1.11 ms in C11 — 1,110x Lower Jitter ]', 
              fontsize=13.5, fontweight='bold', color='#f0f6fc', pad=18)
 
 # Annotations for Tail Latencies
-ax.annotate('3.0 µs (Zig p99)\n[370x Lower Jitter!]', xy=(3, 3000), xytext=(2.3, 10000),
+ax.annotate('1.0 µs (Zig p99)\n[1,110x Lower Jitter!]', xy=(3, 1000), xytext=(2.3, 4000),
             arrowprops=dict(arrowstyle="->", color='#F7A41D', lw=1.8), fontsize=10.5, color='#F7A41D', fontweight='bold')
 ax.annotate('1.11 ms (C11 p99)', xy=(3, 1109791), xytext=(2.6, 2500000),
             arrowprops=dict(arrowstyle="->", color='#58a6ff', lw=1.5), fontsize=10.5, color='#58a6ff', fontweight='bold')
 
-ax.annotate('154 µs (Zig p99.9)\n[8.2x Lower]', xy=(4, 154000), xytext=(3.4, 50000),
+ax.annotate('96 µs (Zig p99.9)\n[13.2x Lower]', xy=(4, 96000), xytext=(3.4, 30000),
             arrowprops=dict(arrowstyle="->", color='#F7A41D', lw=1.8), fontsize=10.5, color='#F7A41D', fontweight='bold')
 
 ax.grid(True, linestyle='--', alpha=0.2, color='#8b949e', which='both', zorder=0)
