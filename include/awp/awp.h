@@ -146,6 +146,24 @@ typedef struct awp_config {
     const char **broadcast_feeds; /**< NULL-terminated list, or NULL. */
 } awp_config_t;
 
+/**
+ * High-Performance Low-Latency Arena Allocator (Bump Allocator).
+ * Ideal for bulk pool lifecycle allocation and zero-cost O(1) tick-based memory recycling.
+ */
+typedef struct awp_arena_chunk awp_arena_chunk_t;
+
+typedef struct awp_arena {
+    awp_arena_chunk_t *head;
+    size_t default_chunk_size;
+    size_t total_allocated;
+} awp_arena_t;
+
+void  awp_arena_init(awp_arena_t *a, size_t default_chunk_size);
+void *awp_arena_alloc(awp_arena_t *a, size_t size, size_t alignment);
+void *awp_arena_calloc(awp_arena_t *a, size_t count, size_t size, size_t alignment);
+void  awp_arena_reset(awp_arena_t *a);
+void  awp_arena_destroy(awp_arena_t *a);
+
 /** Initialize config with safe defaults. Caller still sets process + sizes. */
 void awp_config_init(awp_config_t *cfg);
 

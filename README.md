@@ -29,9 +29,10 @@ Designed as the C equivalent of a permanent-worker market-data dispatch stage. L
 | **Rust** ([`awp-rs`](bindings/rust)) | Safe FFI + Zero-Copy Claim | **0.50 M msg/s** | **10.80 µs** | RAII `ClaimGuard` over `libawp.a` |
 
 Full benchmark reports and architecture evolution reasoning:
-- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md)
-- [`docs/EVOLUTION_PLAN.md`](docs/EVOLUTION_PLAN.md)
-- [`docs/ARCHITECTURE_REASONING.md`](docs/ARCHITECTURE_REASONING.md)
+- [`docs/MEMORY_MODELS.md`](docs/MEMORY_MODELS.md) — Comprehensive low-latency memory models & cache architecture
+- [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) — Benchmark reports & latency histograms
+- [`docs/EVOLUTION_PLAN.md`](docs/EVOLUTION_PLAN.md) — 4-phase HFT transformation plan
+- [`docs/ARCHITECTURE_REASONING.md`](docs/ARCHITECTURE_REASONING.md) — Multi-agent architectural analysis
 
 ## Lifetime contract (read this before production use)
 

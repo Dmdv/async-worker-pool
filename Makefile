@@ -24,7 +24,7 @@ ifeq ($(UNAME_S),Linux)
   override CFLAGS += -D_GNU_SOURCE
 endif
 
-SRC := src/ring.c src/frame_pool.c src/shard.c src/worker.c src/supervisor.c src/pool.c
+SRC := src/arena.c src/ring.c src/frame_pool.c src/shard.c src/worker.c src/supervisor.c src/pool.c
 OBJ := $(SRC:.c=.o)
 LIB := libawp.a
 
@@ -37,6 +37,7 @@ TEST_E2E_MODES  := build/test_e2e_modes
 TEST_E2E_LIFE   := build/test_e2e_lifecycle
 TEST_RING       := build/test_ring_modes
 TEST_TEARDOWN   := build/test_teardown_contract
+TEST_ARENA      := build/test_arena
 TEST_RESTART_FAIL := build/test_restart_create_fail
 
 # Hooks object: worker rebuilt with -DAWP_TEST_HOOKS for injection tests
@@ -109,6 +110,9 @@ $(TEST_RING): tests/test_ring_modes.c $(LIB)
 $(TEST_TEARDOWN): tests/test_teardown_contract.c $(LIB)
 	$(CC) $(CFLAGS) -Itests -Isrc $< -L. -lawp $(LDFLAGS) -o $@
 
+$(TEST_ARENA): tests/test_arena.c $(LIB)
+	$(CC) $(CFLAGS) -Itests $< -L. -lawp $(LDFLAGS) -o $@
+
 $(TEST_RESTART_FAIL): tests/test_restart_create_fail.c $(LIB_HOOKS)
 	$(CC) $(CFLAGS) -DAWP_TEST_HOOKS -Itests -Isrc $< -Lbuild -lawp_hooks $(LDFLAGS) -o $@
 
@@ -148,7 +152,7 @@ $(EX_MPMC): examples/example_mpmc.c $(LIB)
 	$(CC) $(CFLAGS) -Isrc $< -L. -lawp $(LDFLAGS) -o $@
 
 tests: dirs $(TEST_UNIT) $(TEST_UNIT_MODES) $(TEST_SUP) $(TEST_E2E) \
-	$(TEST_E2E_MODES) $(TEST_E2E_LIFE) $(TEST_RING) $(TEST_TEARDOWN) $(TEST_RESTART_FAIL)
+	$(TEST_E2E_MODES) $(TEST_E2E_LIFE) $(TEST_RING) $(TEST_TEARDOWN) $(TEST_ARENA) $(TEST_RESTART_FAIL)
 bench: dirs $(BENCH_DISPATCH) $(BENCH_ALL_MODES) $(BENCH_RING) $(BENCH_OPENLOOP) $(BENCH_CONTENTION) $(BENCH_ZEROCOPY)
 examples: dirs $(EX_SIMPLE) $(EX_SPSC) $(EX_MPSC) $(EX_SPMC) $(EX_MPMC)
 e2e: $(TEST_E2E) $(TEST_E2E_MODES)
@@ -156,6 +160,7 @@ e2e: $(TEST_E2E) $(TEST_E2E_MODES)
 # Functional correctness only — no latency thresholds (CI default).
 check: check-func
 check-func: tests
+	@echo "=== arena ===" && $(TEST_ARENA)
 	@echo "=== unit (legacy) ===" && $(TEST_UNIT)
 	@echo "=== unit modes (all) ===" && $(TEST_UNIT_MODES) all
 	@echo "=== ring modes (exact ID) ===" && $(TEST_RING)
